@@ -22,6 +22,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/SessionModels.swift" \
   "$IOS/Domain/SpeechTranscript.swift" \
   "$IOS/Domain/SentenceSplitter.swift" \
+  "$IOS/Domain/ScriptLanguage.swift" \
   "$IOS/Domain/TextTokenizer.swift" \
   "$IOS/Domain/VoiceCommand.swift" \
   "$IOS/Domain/TakeArchive.swift" \
@@ -34,6 +35,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   ios/EngineHarness/VoiceScenarios.swift \
   ios/EngineHarness/CameraScenarios.swift \
   ios/EngineHarness/ArchiveScenarios.swift \
+  ios/EngineHarness/LayoutScenarios.swift \
   ios/EngineHarness/main.swift \
   -o "$OUT/engine_harness"
 
