@@ -36,12 +36,27 @@ struct TeleprompterOverlayView: View {
     /// Keeps glyphs off the band's rounded edge. Applied to the text and to
     /// the fill's origin, so the two stay in register.
     private let textInset: CGFloat = 7
-    /// One weight for every row — see the note above.
-    private let rowWeight: Font.Weight = .medium
-    private let uiRowWeight: UIFont.Weight = .medium
 
     private var effectiveTextSize: CGFloat {
         state.language.effectiveTextSize(base: textSize)
+    }
+
+    /// One font object, drawn with *and* measured with.
+    ///
+    /// Every row renders at this exact font and `reportLayout` hands the same
+    /// instance to the measurer, so the glyph advances behind
+    /// `PromptLine.characterXOffsets` are by construction the advances the text
+    /// is drawn at. Two constants — a `Font.Weight` for the rows and a
+    /// `UIFont.Weight` for the measurer — could drift apart with nothing
+    /// failing to compile, and the symptom would be the highlight edge sliding
+    /// along the line instead of landing on a character boundary.
+    ///
+    /// `Font(rowFont)` is not a change of appearance: measured on the
+    /// simulator it renders identical to `.system(size:weight:)` at the same
+    /// size and `.medium`, at every size the type slider reaches, and neither
+    /// form scales with Dynamic Type.
+    private var rowFont: UIFont {
+        .systemFont(ofSize: effectiveTextSize, weight: .medium)
     }
 
     /// Uniform row pitch. There is deliberately no inter-row spacing: an extra
@@ -126,7 +141,7 @@ struct TeleprompterOverlayView: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(state.lines) { line in
                 Text(line.text)
-                    .font(.system(size: effectiveTextSize, weight: rowWeight))
+                    .font(Font(rowFont))
                     .foregroundStyle(.white.opacity(opacity(of: line)))
                     // Never re-wrap: the line was already broken to fit, and a
                     // one-point disagreement with our measurement must not
@@ -204,7 +219,7 @@ struct TeleprompterOverlayView: View {
         guard measuredWidth > textInset else { return }
         onLayoutChange(
             measuredWidth - textInset,
-            SystemFontLineMeasurer(textSize: effectiveTextSize, weight: uiRowWeight)
+            SystemFontLineMeasurer(font: rowFont)
         )
     }
 }

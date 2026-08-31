@@ -5,9 +5,11 @@ import UIKit
 ///
 /// The font must be the one the overlay actually renders with, or lines break
 /// somewhere other than where they are drawn — and the character-granular
-/// highlight edge lands on the wrong glyph. SwiftUI's
-/// `Font.system(size:weight:)` is `UIFont.systemFont(ofSize:weight:)`, so that
-/// is what gets measured, at the same single weight every row is drawn in.
+/// highlight edge lands on the wrong glyph. So it is taken as a value rather
+/// than rebuilt here from a size and a weight: the overlay draws its rows with
+/// `Font(_:)` around this very instance, which makes "drawn with" and
+/// "measured with" the same object instead of two descriptions that have to
+/// agree.
 ///
 /// Measures only; breaking stays in `PromptLineLayout` (see the note on
 /// `TextWidthMeasuring`).
@@ -19,8 +21,8 @@ import UIKit
 struct SystemFontLineMeasurer: TextWidthMeasuring {
     private let font: UIFont
 
-    init(textSize: CGFloat, weight: UIFont.Weight = .medium) {
-        self.font = UIFont.systemFont(ofSize: textSize, weight: weight)
+    init(font: UIFont) {
+        self.font = font
     }
 
     func characterWidths(of text: String) -> [CGFloat] {
