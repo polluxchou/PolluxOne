@@ -167,6 +167,11 @@ enum PromptLineLayout {
   - **行首禁则**：下一行不得以 `。，、；：！？）］｝」』〉》” ’ ·` 开头 → 断点左移一格
   - **行尾禁则**：本行不得以 `（［｛「『〈《“ ‘` 结尾 → 断点左移一格
   - 左移最多 2 格，再不行就照原位断（避免病态输入下死循环）
+  - **内嵌拉丁词不切开**：断点落在一串 ASCII 字母/数字中间时，退回该词首。中文脚本
+    里嵌英文是常态——`MockBackendClient.swift:85` 自带的示例脚本就是
+    `"Pollux One 从另一个问题出发。"`，`detect` 判它 `.cjk`，只做禁则的话
+    "Pollux One" 会被腰斩成 `"Pollux On"` / `"e 从另一个…"`。整个词比列还宽时照原位
+    硬切，否则会得到一个近乎空的行而词照样被切。这条规则在禁则之前应用。
 
 **`Features/Recording/SystemFontLineMeasurer.swift`** — iOS 侧实测（**不进** harness）
 

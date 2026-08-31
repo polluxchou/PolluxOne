@@ -967,6 +967,118 @@ git commit -m "Break the script into the visual lines a fixed window can hold"
 
 ---
 
+## Task 3b: CJK 脚本里的拉丁词不切开
+
+Task 3 的自审提出了这条。落地前确认它**不是**边界情况：`ios/Pollux One/Networking/MockBackendClient.swift:85` 自带的示例脚本就是 `"Pollux One 从另一个问题出发。…"`，`ScriptLanguage.detect` 判它 `.cjk`，而 `.cjk` 分支只做禁则、任意字符间可断。在 `FakeTextMeasurer(em: 10)` + 列宽 45pt 下，第一行是 `"Pollux On"`，第二行以孤立的 `"e"` 开头。
+
+**Files:**
+- Modify: `ios/Pollux One/Domain/PromptLineLayout.swift`
+- Modify: `ios/EngineHarness/LayoutScenarios.swift`
+
+- [ ] **Step 1: 写会失败的场景**
+
+在 `ios/EngineHarness/LayoutScenarios.swift` 里，紧接在 `report.section("line breaking — CJK avoids opening a line with closing punctuation")` 那一整段**之后**插入：
+
+```swift
+    report.section("line breaking — a Latin word inside a CJK script is not cut in half")
+
+    // The app's own sample script opens exactly like this, so this is the
+    // common case rather than an edge one.
+    let mixed = PromptScriptText.build(makeLayoutScript(["Pollux One 从另一个问题出发。"]))
+
+    report.check(mixed.language == .cjk,
+                 "a Chinese paragraph carrying a Latin product name is still CJK")
+
+    // 45pt at em 10: the width-driven break lands on the "e" of "One".
+    let mixedLines = PromptLineLayout.lines(for: mixed, width: 45, measurer: measurer)
+
+    report.check(mixedLines.first?.text == "Pollux ",
+                 "the break falls back to the start of the Latin word instead of splitting it",
+                 detail: "\(mixedLines.map(\.text))")
+    report.check(mixedLines.count > 1 && mixedLines[1].text.hasPrefix("One"),
+                 "so the next line opens on the whole word")
+
+    // A word wider than the whole column still has to be cut: falling back
+    // past the line's start would leave an empty line and cut it anyway.
+    let tooNarrow = PromptLineLayout.lines(for: mixed, width: 25, measurer: measurer)
+
+    report.check(tooNarrow.first?.text == "Pollu",
+                 "a Latin word wider than the column is still cut",
+                 detail: "\(tooNarrow.map(\.text))")
+```
+
+- [ ] **Step 2: 运行，确认失败**
+
+```bash
+./scripts/test-engines.sh
+```
+
+Expected: `162 passed, 2 failed` —— `mixedLines.first?.text` 实际是 `"Pollux On"`，第二行以 `"e "` 开头。`mixed.language` 和 `tooNarrow` 两条本来就过。
+
+- [ ] **Step 3: 在 `.cjk` 分支加这条规则**
+
+修改 `ios/Pollux One/Domain/PromptLineLayout.swift` 的 `adjustedBreak(in:from:proposed:language:)`，把整个 `case .cjk:` 分支替换为：
+
+```swift
+        case .cjk:
+            // A Chinese script routinely carries Latin names — the app's own
+            // sample opens "Pollux One 从另一个问题出发" — and the CJK rule of
+            // "break between any two characters" cuts them in half. So a Latin
+            // word inside CJK gets the Latin treatment first: fall back to the
+            // word's start. Only when that would empty the line is the word
+            // cut, for the same reason as the Latin branch.
+            var candidate = proposed
+            if isLatinWord(characters[proposed]),
+               candidate > start,
+               isLatinWord(characters[candidate - 1]) {
+                var scan = candidate - 1
+                while scan > start, isLatinWord(characters[scan - 1]) { scan -= 1 }
+                if scan > start { candidate = scan }
+            }
+
+            // Chinese breaks between any two characters, with two exceptions:
+            // a line may not open with closing punctuation (行首禁则), and may
+            // not close with opening punctuation (行尾禁则). Shift left at most
+            // twice — a run of brackets must not loop, and two is enough for
+            // every real case.
+            for _ in 0..<2 {
+                let opensBadly = noLineStart.contains(characters[candidate])
+                let closesBadly = candidate > start && noLineEnd.contains(characters[candidate - 1])
+                guard opensBadly || closesBadly, candidate - 1 > start else { break }
+                candidate -= 1
+            }
+            return candidate
+```
+
+并在 `noLineEnd` 的定义之后加：
+
+```swift
+    /// What counts as "inside a word" when a Latin run appears in CJK text.
+    /// ASCII letters and digits only: breaking after a hyphen or a comma is
+    /// correct, and widening this to every non-CJK character would stop the
+    /// prompter from ever breaking a long run of punctuation.
+    private static func isLatinWord(_ character: Character) -> Bool {
+        character.isASCII && (character.isLetter || character.isNumber)
+    }
+```
+
+- [ ] **Step 4: 运行，确认全过**
+
+```bash
+./scripts/test-engines.sh
+```
+
+Expected: `TOTAL: 164 passed, 0 failed`（160 + 4）。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add "ios/Pollux One/Domain/PromptLineLayout.swift" ios/EngineHarness/LayoutScenarios.swift
+git commit -m "Keep Latin words whole when they appear in a Chinese script"
+```
+
+---
+
 ## Task 4: `ReadingPacer` — 连续光标
 
 这个 Task 里的 `lookaheadCap` 是整套设计的安全阀。纯 dead reckoning 遇到读者停下来喝水、被打断、或识别整段失败，就会一路匀速把提词器推到脚本末尾。
@@ -1293,7 +1405,7 @@ final class ReadingPacer {
 ./scripts/test-engines.sh
 ```
 
-Expected: `TOTAL: 177 passed, 0 failed`（160 + 17）。
+Expected: `TOTAL: 181 passed, 0 failed`（164 + 17）。
 
 - [ ] **Step 6: 提交**
 
@@ -1762,7 +1874,7 @@ final class TeleprompterEngine {
 ./scripts/test-engines.sh
 ```
 
-Expected: `TOTAL: 197 passed, 0 failed`（177 + 20）。
+Expected: `TOTAL: 201 passed, 0 failed`（181 + 20）。
 
 - [ ] **Step 7: 提交**
 
@@ -2228,7 +2340,7 @@ Expected: `** BUILD SUCCEEDED **`。
 ./scripts/test-engines.sh
 ```
 
-Expected: `TOTAL: 197 passed, 0 failed`。
+Expected: `TOTAL: 201 passed, 0 failed`。
 
 - [ ] **Step 5: 在模拟器上看一眼几何**
 
@@ -2260,7 +2372,7 @@ git commit -m "Wire the prompter's column width, scrim, and pacing clock togethe
 - 推进按整行吸附 + 0.3s 缓动；行内进度由字级高亮连续体现
 - 速度来自实测语速（指数平滑，夹在语种上下限内），两次识别之间 dead reckoning，封在真值前方 1.2 行
 - `textWidthFraction` 第一次真的接通
-- 离线场景从 107 条增加到 197 条，新增的全部集中在"静默出错"的地方：拼接口径、真值分母、断行禁则、前推上限、重排后位置保持、30Hz 不污染文字块
+- 离线场景从 107 条增加到 201 条，新增的全部集中在"静默出错"的地方：拼接口径、真值分母、断行禁则、前推上限、重排后位置保持、30Hz 不污染文字块
 
 ## 仍需真机验证的部分（不在本计划内）
 
