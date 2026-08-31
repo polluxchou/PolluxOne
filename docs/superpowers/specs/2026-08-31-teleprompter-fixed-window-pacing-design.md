@@ -85,6 +85,12 @@ cursor ──► currentLineIndex（整数部分定位到行）
 CJK 检测现在在 `TeleprompterOverlayView.swift:30`（按字符占比 > 0.2）和
 `TextTokenizer.swift:42`（按 Character 扩展）各写了一份，码点范围还不一致。合成一处：
 
+`SpeechRecognitionService.locale(forScriptText:)` 里还有第三份（只查
+`0x4E00...0x9FFF`），**故意不合并**。它回答的是另一个问题：给识别器哪个 locale。
+`ScriptLanguage` 把假名和汉字归为同一类，因为**排版**上它们确实一样；但识别器不能
+——日文脚本喂给 `zh-CN` 和喂给 `en-US` 一样是噪声。用 `detect` 替换它只是把一个错
+答案换成另一个错答案。日文脚本的 locale 是一个独立的、这次不碰的缺陷。
+
 ```swift
 enum ScriptLanguage: Equatable {
     case cjk

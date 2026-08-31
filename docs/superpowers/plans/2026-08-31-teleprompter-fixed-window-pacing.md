@@ -282,11 +282,11 @@ extension Unicode.Scalar {
 
 extension Character {
     var isCJKIdeographOrKana: Bool {
-        unicodeScalars.contains(\.isCJKIdeographOrKana)
+        unicodeScalars.contains(where: \.isCJKIdeographOrKana)
     }
 
     var isCJKPunctuation: Bool {
-        unicodeScalars.contains(\.isCJKPunctuation)
+        unicodeScalars.contains(where: \.isCJKPunctuation)
     }
 }
 ```
