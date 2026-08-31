@@ -118,44 +118,82 @@ supabase db push
 schema 已经在本地临时 Postgres 17 实例（stub 了 `auth` schema）跑过完整插入
 测试，包括 `script_sections` 变更触发 `scripts.version` 自增的 trigger。
 
+## 测试
+
+Reading-following 是产品的命门，而它的输入输出都是纯数据（Script + 语音
+transcript → ReadingPosition），所以不需要摄像头/麦克风就能验证：
+
+```bash
+./scripts/test-alignment.sh
+```
+
+这个脚本直接用 `swiftc` 编译真实的 Domain + `ScriptAlignmentEngine` 源码
+（不是 mock），跑 36 个朗读场景并打印每一步的置信度；有任何一例失败就返回
+非零，可以直接当 CI 门禁用。覆盖的行为：
+
+| 场景 | 中文 | 英文 |
+|---|---|---|
+| 顺序朗读 | ✓ | ✓ |
+| **只念了半句就要跟上**（产品最核心的行为） | — | ✓ |
+| 重复一句（保持不动，不能往前跳） | ✓ | ✓ |
+| 跳过一句 | ✓ | ✓ |
+| 往回跳两句 | — | ✓ |
+| 口语化改写／临时加词 | ✓ | ✓ |
+| 念错后重说 | — | ✓ |
+| 识别结果完全没有标点（ASR 常态） | ✓ | — |
+| 无关说话/噪音（不能乱跑） | — | ✓ |
+| 长时间停顿 | — | ✓ |
+
+同一批场景也写成了 Swift Testing 版本放在
+`ios/Pollux OneTests/ScriptAlignmentEngineTests.swift`，等 Xcode 里加上 test
+target（File ▸ New ▸ Target ▸ Unit Testing Bundle）就能在 IDE 里跑。
+
+Web 侧：`cd web && npm run lint && npm run build`。
+
 ## 当前状态
 
-**已完成、可运行：**
-- iOS：Xcode 工程可编译运行（已用 `xcodebuild` + Simulator 验证），登录 → Script
-  列表 → Recording HUD 的完整视图层已搭好，Camera/Speech/Teleprompter/SafeWord
-  各 Engine 均有 V1 实现（用 Mock 数据可跑通，无需 Supabase key）。
-- Web：登录 / Script 列表 / Script 编辑（标题 + 正文，空行分段、句号分句）三个
-  页面完整可用，`next build` / `next lint` 均通过。
-- Backend：11 张表 + RLS + 自动建 profile / 自动加 script 版本号的 trigger，
-  已跑过插入测试。
+**已完成、可验证：**
+- **iOS 提词跟随算法**：`ScriptAlignmentEngine` 36/36 场景通过（见上表），
+  中英双语。打分由两项组成——`coverage`（这句念了多少）+ `ownership`（刚说的
+  几个词属于哪句）。`ownership` 是关键：只用 coverage 的话，一句念完的旧句
+  会压过刚开始念的新句，导致高亮永远慢一句，正好是产品要解决问题的反面。
+- **iOS Recording HUD**：完全按 Claude Design 的 `Pollux One iOS.dc.html`
+  「04 · Recording — HUD」实现，位置用设计稿的绝对偏移量。已在 Simulator
+  实测中英双稿渲染正确。
+- **iOS 工程**：`xcodebuild` 编译通过、Simulator 实跑通登录 → 列表 → 录制页。
+- **Web**：登录 / 列表 / 编辑三页可用，`next build`、`next lint` 通过。
+- **Backend**：11 张表 + RLS + 两个 trigger，在本地 Postgres 17 跑过插入测试。
 
-**尚未实现的核心能力：**
-- iOS 端真正接入 Supabase（目前是 `MockBackendClient`，接口已就位，换掉
-  `AppEnvironment` 里的实现即可）。
-- Recording HUD 的视觉细节——目前是本仓库自己设计的一版极简 HUD；后续会对照
-  Claude Design 里那份 `Pollux One iOS.dc.html` 设计稿重新实现顶部 HUD /
-  提词区 / 底部相机参数条的具体视觉规格（配色、圆角、字重等），这部分正在
-  推进中。
-- Safe Word 触发后的语音指令解析目前只是关键词匹配（"change this to..." 等
-  几个固定短语），不是真正的意图理解。
-- Web 端还没有把 `script_reading_progress` 展示出来（后端已经建表）。
+**尚未实现／未验证：**
+- **真机验证**：算法在离线场景上全过，但真实 ASR 的口音、噪音、识别延迟会怎样
+  影响，只有真机念稿子才知道。这是目前最大的未知。
+- iOS 还没接真实 Supabase（`MockBackendClient` → `SupabaseBackendClient`，
+  接口已就位，改 `AppEnvironment` 一处即可）。
+- Voice Command 只是关键词匹配（"change this to…" 等几个固定短语），不是
+  意图理解。
+- 相机翻转是占位（V1 只用前置，符合眼神接触的定位）。
+- Web 还没展示 `script_reading_progress`（后端已建表）。
+- Xcode 里还没有 test target（测试文件已就位，见「测试」一节）。
 
 ## 下一步最合理的开发顺序
 
-1. 建一个真实 Supabase 项目，跑通 Web 的注册/登录/建稿，验证 RLS 策略。
-2. 按 Claude Design 设计稿重做 iOS Recording HUD 的视觉层（Engine/ViewModel
-   不用大改，主要是 `Features/Recording/*View.swift` 的样式）。
-3. 把 iOS `MockBackendClient` 换成真正的 `SupabaseBackendClient`（加
-   `supabase-swift` 包），打通 Web → iOS 的 Script Sync。
-4. 真机测试 Camera + Speech Recognition 的实际效果，调 `ScriptAlignmentEngine`
-   的窗口大小/置信度阈值。
-5. Safe Word → Voice Command 的解析逐步做得更鲁棒。
+1. **真机跑一次完整录制**——这是现在信息量最大的一步：验证 Speech
+   framework 的实际识别质量、`ScriptAlignmentEngine` 在真实语音下的表现、
+   以及摄像头 HUD 在真实画面上的可读性。
+2. 建真实 Supabase 项目，跑通 Web 注册/登录/建稿，验证 RLS。
+3. iOS 接 `supabase-swift`，实现 `SupabaseBackendClient`，打通 Web → iOS 同步。
+4. 根据真机结果调 `ScriptAlignmentEngine` 的 `lookBehind`/`lookAhead`/
+   `recentTokenWindow`/`minimumConfidence`——每改一个参数都先跑
+   `./scripts/test-alignment.sh` 确认没有回退。
+5. Safe Word → Voice Command 的解析做得更鲁棒。
 
 ## 当前最大的三个技术风险
 
-1. **Speech-to-Script Alignment 的实际准确率没有真机验证过**——V1 用的是
-   简单的 token 重叠打分，真实朗读中的口音、背景噪音、口语化改写会怎样影响
-   置信度，需要真机 + 真实录音测试才知道。
+1. **真实 ASR 质量是最大未知**。离线 36 个场景全过说明对齐逻辑本身是对的，
+   但那些 transcript 是我写的、干净的。真实的 Speech framework 输出会有识别
+   错误、延迟、以及中文分词歧义；口音重或环境吵时置信度会掉到什么程度，
+   目前完全没有数据。缓解手段是接口已经解耦（换 ASR provider 或换成
+   LLM-assisted alignment 都不用动 TeleprompterEngine）。
 2. **Recording Session 冻结版本 + Safe Word 本地编辑 + 事后合并回云端**这条
    链路目前只有 iOS 侧的内存实现，`ScriptSyncService.syncEditsToCloud()` 还
    没有对着真实 Supabase 跑过；Web 同时编辑同一篇稿子时的冲突处理策略还没定。

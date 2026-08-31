@@ -63,26 +63,34 @@ final class SlidingWindowAlignmentEngine: ScriptAlignmentEngine {
         guard !flatSentences.isEmpty, transcript.text != lastEmittedText else { return nil }
         lastEmittedText = transcript.text
 
-        // Speech results are cumulative for the whole take; only the tail is
-        // relevant to "where are we right now".
-        let spokenTail = normalizedTokens(of: transcript.text).suffix(12)
-        guard !spokenTail.isEmpty else { return nil }
-
         let windowStart = max(0, currentIndex - lookBehind)
         let windowEnd = min(flatSentences.count - 1, currentIndex + lookAhead)
+
+        let candidates: [(index: Int, tokens: [String])] = (windowStart...windowEnd).map {
+            ($0, normalizedTokens(of: flatSentences[$0].sentence.text))
+        }
+
+        // Speech results are cumulative for the whole take; only the tail is
+        // relevant to "where are we right now". The tail has to cover about
+        // one sentence, and sentence length in tokens varies wildly between
+        // space-delimited and per-character CJK text — so size it from the
+        // candidates in play rather than a fixed count.
+        let longestCandidate = candidates.map(\.tokens.count).max() ?? 12
+        let tailLength = min(64, max(12, longestCandidate + 4))
+        let spokenTail = Array(normalizedTokens(of: transcript.text).suffix(tailLength))
+        guard !spokenTail.isEmpty else { return nil }
 
         var bestIndex = currentIndex
         var bestScore = 0.0
         var bestTokenOffset = 0
 
-        for index in windowStart...windowEnd {
-            let candidateTokens = normalizedTokens(of: flatSentences[index].sentence.text)
-            guard !candidateTokens.isEmpty else { continue }
-            let (score, offset) = overlapScore(spoken: Array(spokenTail), candidate: candidateTokens)
+        for candidate in candidates {
+            guard !candidate.tokens.isEmpty else { continue }
+            let (score, offset) = overlapScore(spoken: spokenTail, candidate: candidate.tokens)
             // Ties favor the earliest (least-jumpy) candidate.
             if score > bestScore {
                 bestScore = score
-                bestIndex = index
+                bestIndex = candidate.index
                 bestTokenOffset = offset
             }
         }
@@ -105,30 +113,81 @@ final class SlidingWindowAlignmentEngine: ScriptAlignmentEngine {
         )
     }
 
-    /// Fraction of `spoken` tokens found in `candidate`, in order, allowing
-    /// gaps (a cheap longest-common-subsequence ratio). Returns the index in
-    /// `candidate` of the last matched token, used as the within-sentence
-    /// reading position.
+    /// How many of the most recent spoken tokens decide which sentence is
+    /// being read. Small on purpose: this is the term that lets the prompter
+    /// move onto a line as soon as the reader *starts* it.
+    private let recentTokenWindow = 6
+
+    /// Scores how likely `candidate` is the sentence being read right now.
+    ///
+    /// Normalizing by the spoken tail (the obvious approach) is wrong twice
+    /// over: the tail deliberately spans more than one sentence, so every
+    /// candidate scores low however cleanly it was read. Two terms instead:
+    ///
+    /// - **coverage** — how much of the candidate has been spoken, in order
+    ///   and allowing gaps, so dropped or misrecognized words still match.
+    /// - **ownership** — how much of what was *just* said belongs to this
+    ///   candidate.
+    ///
+    /// Ownership is the load-bearing half. With coverage alone, a fully-read
+    /// sentence outscores the one being started, so the highlight only
+    /// advances after each line is finished — leaving the reader looking at a
+    /// stale line, which is the exact problem this product exists to fix.
+    /// Weighting them equally means six words into the next sentence, that
+    /// sentence already wins, while a repeated line still holds (its
+    /// ownership stays high) and unrelated speech moves nothing (no candidate
+    /// owns it, so the current line keeps a bare-majority score).
+    ///
+    /// Coverage matching runs backwards to find the *latest* occurrence: when
+    /// a line appears twice in the tail, the second reading is the live one.
+    ///
+    /// Returns the score plus the furthest candidate token reached, which
+    /// becomes `ReadingPosition.tokenIndexInSentence`.
     private func overlapScore(spoken: [String], candidate: [String]) -> (Double, Int) {
-        var candidateCursor = 0
+        guard !spoken.isEmpty, !candidate.isEmpty else { return (0, 0) }
+
+        var tailCursor = spoken.count - 1
         var matched = 0
-        var lastMatchIndex = 0
-        for token in spoken {
-            if let foundOffset = candidate[candidateCursor...].firstIndex(where: { $0 == token }) {
-                matched += 1
-                candidateCursor = foundOffset + 1
-                lastMatchIndex = foundOffset
+        var furthestCandidateIndex = 0
+        var sawMatch = false
+
+        for candidateIndex in stride(from: candidate.count - 1, through: 0, by: -1) {
+            guard tailCursor >= 0 else { break }
+            guard let found = spoken[...tailCursor].lastIndex(of: candidate[candidateIndex]) else { continue }
+            matched += 1
+            if !sawMatch {
+                sawMatch = true
+                furthestCandidateIndex = candidateIndex
+            }
+            tailCursor = found - 1
+        }
+
+        let coverage = Double(matched) / Double(candidate.count)
+        let ownership = ownershipOfRecentSpeech(spoken: spoken, candidate: candidate)
+        guard matched > 0 || ownership > 0 else { return (0, 0) }
+
+        return (0.5 * coverage + 0.5 * ownership, furthestCandidateIndex)
+    }
+
+    /// Fraction of the last `recentTokenWindow` spoken tokens that appear, in
+    /// order, in `candidate`.
+    private func ownershipOfRecentSpeech(spoken: [String], candidate: [String]) -> Double {
+        let recent = spoken.suffix(recentTokenWindow)
+        guard !recent.isEmpty else { return 0 }
+
+        var candidateCursor = 0
+        var owned = 0
+        for token in recent {
+            guard candidateCursor < candidate.count else { break }
+            if let found = candidate[candidateCursor...].firstIndex(of: token) {
+                owned += 1
+                candidateCursor = found + 1
             }
         }
-        guard !spoken.isEmpty else { return (0, 0) }
-        return (Double(matched) / Double(spoken.count), lastMatchIndex)
+        return Double(owned) / Double(recent.count)
     }
 
     private func normalizedTokens(of text: String) -> [String] {
-        text
-            .lowercased()
-            .split(separator: " ")
-            .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-            .filter { !$0.isEmpty }
+        TextTokenizer.tokens(in: text)
     }
 }

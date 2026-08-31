@@ -2,16 +2,6 @@ import AVFoundation
 import Foundation
 import Speech
 
-/// One incremental speech result. `isFinal` mirrors SFSpeechRecognitionResult
-/// but nothing above this file needs to know that Speech.framework exists —
-/// ScriptAlignmentEngine only ever sees this struct, so the recognizer can be
-/// replaced (on-device model, different provider) without touching alignment.
-struct SpeechTranscript: Equatable {
-    let text: String
-    let isFinal: Bool
-    let timestamp: Date
-}
-
 protocol SpeechRecognitionServiceDelegate: AnyObject {
     func speechRecognitionService(_ service: SpeechRecognitionService, didProduce transcript: SpeechTranscript)
     func speechRecognitionService(_ service: SpeechRecognitionService, didTapAudioBuffer buffer: AVAudioPCMBuffer)
