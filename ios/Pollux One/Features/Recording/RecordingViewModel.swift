@@ -22,6 +22,14 @@ final class RecordingViewModel {
         capabilityService.estimatedRecordingTimeRemaining(for: sessionManager.cameraEngine.configuration)
     }
 
+    /// The single line the top HUD shows about where the last take went.
+    var archiveMessage: String? {
+        TakeArchiveMessage.hudText(
+            state: sessionManager.takeArchiveState,
+            permission: sessionManager.photoLibraryPermission
+        )
+    }
+
     func start(script: Script) async {
         await sessionManager.prepare(script: script)
     }
@@ -35,6 +43,15 @@ final class RecordingViewModel {
     }
 
     func selectParameter(_ parameter: CameraParameter) {
+        // FOCUS has no slider to open: AUTO and LOCK are the whole control, so
+        // tapping the value toggles it. Without this the column was inert —
+        // it read AUTO forever and nothing happened when you pressed it.
+        if parameter == .focus {
+            let engine = sessionManager.cameraEngine
+            engine.setFocusLocked(engine.configuration.focusMode != .locked)
+            activeParameter = nil
+            return
+        }
         activeParameter = (activeParameter == parameter) ? nil : parameter
     }
 
@@ -46,20 +63,32 @@ final class RecordingViewModel {
         isAdjustingTeleprompter = false
     }
 
-    func selectLens(_ lens: CameraLensPosition) {
-        // V1: front camera exposes at most a wide lens on most devices;
-        // switching maps to the closest zoom factor for lenses without a
-        // dedicated physical element.
-        switch lens {
-        case .ultraWide: sessionManager.cameraEngine.setZoomFactor(0.5)
-        case .wide: sessionManager.cameraEngine.setZoomFactor(1.0)
-        case .telephoto: sessionManager.cameraEngine.setZoomFactor(2.0)
-        }
+    func selectLens(_ lens: CameraLensOption) {
+        sessionManager.cameraEngine.setLens(lens)
+    }
+
+    /// Off while rolling, for the same reason as the flip: reconfiguring the
+    /// device's active format ends the movie file that's being written.
+    var canChangeFormat: Bool {
+        !sessionManager.recordingEngine.isRecording
+    }
+
+    func selectFormat(resolution: RecordingResolution, frameRate: RecordingFrameRate) {
+        guard canChangeFormat else { return }
+        sessionManager.cameraEngine.setFormat(resolution: resolution, frameRate: frameRate)
+    }
+
+    /// Flipping removes and re-adds the session's video input, which ends a
+    /// running movie file early — so it's only offered while stopped, and the
+    /// control is disabled to match rather than failing silently.
+    var canFlipCamera: Bool {
+        !sessionManager.recordingEngine.isRecording
+            && !sessionManager.cameraEngine.isSwitchingCamera
+            && sessionManager.cameraEngine.configuration.availableFacings.count > 1
     }
 
     func flipCamera() {
-        // V1 is front-camera-only per the product spec (eye-contact use
-        // case); this is a placeholder entry point for a future back-camera
-        // b-roll mode rather than a functioning flip today.
+        guard canFlipCamera else { return }
+        Task { await sessionManager.cameraEngine.flipCamera() }
     }
 }
