@@ -179,12 +179,28 @@ enum PromptLineLayout {
 `setLayout(width:measurer:)` 注入。这样引擎本身也不 import UIKit，可以一并进
 harness，窗口逻辑（开头/结尾的空白补齐、行角色、重排后位置保持）因此是可离线断言的。
 
-用 `UIFont.systemFont(ofSize:weight:)`（就是 SwiftUI `Font.system(size:weight:)`
-背后的那支字体）逐字符量宽，按字符缓存——一篇脚本只有几百个不同字符，于是几千次
-文本布局调用收敛成几百次。**只做这一件事**——断行在 `PromptLineLayout` 里。
+把整串文本 `CTLine` 排版一次，再从结果里读每个字符的 advance。字体作为**值**传入
+（视图用 `Font(_:)` 包同一个实例来画），这样"画出来的"和"量出来的"是同一个对象，而
+不是两份需要互相吻合的描述。**只做这一件事**——断行在 `PromptLineLayout` 里。
 
-代价：逐字符测量忽略字符间的 kerning 与连字，长拉丁行量出来比画出来略宽。这个方向
-是安全的（提前断行，而非溢出），视图再留一点余量。
+**逐字符测量是错的（实测修正）。** 本文早前的版本要求逐字符量宽 + 按字符缓存，理由是
+省调用次数。它在中文里会**系统性低估**每一条含标点的行：`，` 或 `。` 单独测量时，在
+19pt 字号下只有 9.6pt——因为它此时是自己那个 run 的末尾，文本引擎会压缩行尾 CJK
+标点；而同一个字符在句子中间画出来是完整的 19.1pt 字身。一行里两个逗号就给断行器
+凭空多出约 19pt，于是多塞进一个字，那个字的右半边被画到列外。模拟器上就是一个被切掉
+右半边的「说」——裁剪在正常工作，只是它裁的是本来就不该放在那里的字。
+
+`CTLine` 版本的 advance 之和精确等于整篇脚本画出来的宽度（两种语种都验过），滑杆能到的
+任何宽度下都没有一行溢出；它还顺带拿到了拉丁文的 kerning，那是逐字符版看不见的，
+而它正在让高亮边界每过一个词就多漂一点。
+
+代价：400 字符一次 `CTLine` 约 1ms，逐字符缓存版是 0.33ms。重排只在列宽或字号变化时
+发生（也就是拖滑杆的时候），这个代价付得起——而断行正确不是可选项。
+
+一个由此产生的边界：上面所有东西都以 **Character** 计数，而 `CTLineGetOffsetForStringIndex`
+吃的是 **UTF-16** 偏移。一个 Character 可能是多个 UTF-16 单元（脚本里的 emoji、组合
+记号），所以这里必须逐 Character 累加 `character.utf16.count`，不能拿 Character 序号
+当索引。
 
 不用 `CTTypesetterSuggestLineBreak`：它确实自带完整的 CJK 换行规则，但那会把断行
 从可离线断言的纯逻辑变成对 CoreText 的黑盒调用，harness 里就测不到了。代价是禁则
@@ -445,10 +461,26 @@ characterXOffsets[floor(inLineProgress × 字符数)]
 `cursor` 是字符偏移，重排后 `currentLineIndex` 由新的行区间重新查得，**不需要迁移逻辑**。
 这是 §4.1 选字符作单位的直接回报，也是要断言的一条不变量。
 
-排版宽度：`RecordingView` 用 `containerRelativeFrame` 把整块收窄到
-屏宽 × `textWidthFraction`，进度轨列（22 + 6）由窗口内的 `HStack` 自然扣掉，
-视图再减去文字的 7pt 左内缩后报给引擎。原来的 `Offset.teleprompterTrailing`
-随之删除——宽度只能有一个主管者。
+排版宽度必须**算出来，不能量出来**：
+
+```
+columnWidth = 提供给整块的宽度 − 进度轨列宽 22 − 轨间距 6 − 文字左内缩 7
+```
+
+"提供给整块的宽度"取自覆盖层最外层的 `GeometryReader`——它填满被提供的空间，
+与内容无关。`RecordingView` 用 `containerRelativeFrame` 把这个提供值收窄到
+屏宽 × `textWidthFraction`。原来的 `Offset.teleprompterTrailing` 删除——宽度只能有
+一个主管者。
+
+**不能**把 `onGeometryChange` 挂在装着文字的容器上去量。滚动的每一行都带
+`.fixedSize(horizontal: true, vertical: false)`（为了让已经断好的行绝不再被 SwiftUI
+折一次），所以那个容器的宽度是**最宽一行的理想宽度**，不是列宽。于是形成自反馈环：
+量到的宽度越大 → 断行越少 → 行越长 → 理想宽度越大。它收敛在"只在 `hardBreaks`
+处断"，即每段一行，全部冲出屏幕——第一次跑模拟器时就是这个现象。
+
+文字 VStack 另外用 `.frame(width: columnWidth, alignment: .leading)` 夹住，让溢出在
+结构上不可能发生；`.clipped()` 仍然保留作最后一道。麦克风电平条也按 `columnWidth`
+取比例，不是按屏宽。
 
 ## 7 · 测试
 
