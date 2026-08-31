@@ -50,7 +50,13 @@ struct RecordingSession: Identifiable, Codable, Equatable {
     var startedAt: Date
     var endedAt: Date?
     var cameraConfiguration: CameraConfiguration
+    /// Set only when archiving failed: the file deliberately left on disk. A
+    /// take that reached the photo library has no local file — the library
+    /// owns it and the working copy is deleted.
     var localVideoURL: URL?
+    /// The take's PHAsset `localIdentifier` once it is in the photo library —
+    /// the only durable handle to where a take actually went.
+    var photoLibraryAssetIdentifier: String?
 
     var isActive: Bool { endedAt == nil }
 }
