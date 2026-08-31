@@ -18,6 +18,10 @@ final class SessionManager {
     /// prompter that isn't following is distinguishable from a mic problem.
     private(set) var speechError: String?
 
+    /// Read by the HUD. @Observable propagates through the passthrough.
+    var takeArchiveState: TakeArchiveState { takeArchiver.state }
+    var photoLibraryPermission: PhotoLibraryAddPermission { takeArchiver.permission }
+
     let cameraEngine: CameraEngine
     let recordingEngine: RecordingEngine
     let teleprompterEngine = TeleprompterEngine()
@@ -28,13 +32,15 @@ final class SessionManager {
     private let safeWordDetector = SafeWordDetector()
     private let voiceCommandEngine = VoiceCommandEngine()
     private let syncService: ScriptSyncService
+    private let takeArchiver: TakeArchiver
 
     private var currentRecordingSession: RecordingSession?
     private var latestTranscriptText = ""
 
-    init(syncService: ScriptSyncService, alignmentEngine: ScriptAlignmentEngine) {
+    init(syncService: ScriptSyncService, alignmentEngine: ScriptAlignmentEngine, takeArchiver: TakeArchiver) {
         self.syncService = syncService
         self.alignmentEngine = alignmentEngine
+        self.takeArchiver = takeArchiver
         let camera = CameraEngine()
         self.cameraEngine = camera
         self.recordingEngine = RecordingEngine(cameraEngine: camera)
@@ -42,6 +48,12 @@ final class SessionManager {
         speechService.delegate = self
         safeWordDetector.delegate = self
         voiceCommandEngine.delegate = self
+        // The archiver outlives this screen; this object does not. That is
+        // exactly the right way round — a take stopped just before the user
+        // swipes back still gets saved, it just has nobody left to report the
+        // asset identifier to.
+        recordingEngine.delegate = takeArchiver
+        takeArchiver.delegate = self
     }
 
     func prepare(script: Script) async {
@@ -59,6 +71,10 @@ final class SessionManager {
         } else {
             speechError = "Microphone or speech access denied — the prompter can't follow you. Enable both in Settings."
         }
+
+        // Asked here rather than at the first save: a refusal discovered after
+        // a take is recorded costs the user that take.
+        await takeArchiver.refreshPermission()
     }
 
     func startTake() {
@@ -69,7 +85,8 @@ final class SessionManager {
             startedAt: Date(),
             endedAt: nil,
             cameraConfiguration: cameraEngine.configuration,
-            localVideoURL: nil
+            localVideoURL: nil,
+            photoLibraryAssetIdentifier: nil
         )
         currentRecordingSession = recordingSession
         readingSession = ReadingSession(
@@ -103,6 +120,15 @@ final class SessionManager {
             // moves and nothing says why.
             speechError = error.localizedDescription
         }
+    }
+
+    /// Leaving the recording screen. Nothing called this before, so the
+    /// capture session — and the camera indicator — stayed live for the rest
+    /// of the app's lifetime.
+    func teardown() {
+        endTake()
+        cameraEngine.stopSession()
+        AudioSessionController.deactivate()
     }
 
     func endTake() {
@@ -226,5 +252,20 @@ extension SessionManager: VoiceCommandEngineDelegate {
     private func currentParagraphId() -> UUID? {
         guard let address = readingSession?.currentPosition?.address else { return nil }
         return address.paragraphId
+    }
+}
+
+extension SessionManager: TakeArchiverDelegate {
+    func takeArchiver(_ archiver: TakeArchiver, didUpdate state: TakeArchiveState) {
+        switch state {
+        case .saved(let identifier):
+            currentRecordingSession?.photoLibraryAssetIdentifier = identifier
+            // The working copy is gone; only the library handle is real now.
+            currentRecordingSession?.localVideoURL = nil
+        case .failed(_, let retainedFileURL):
+            currentRecordingSession?.localVideoURL = retainedFileURL
+        case .idle, .saving:
+            break
+        }
     }
 }

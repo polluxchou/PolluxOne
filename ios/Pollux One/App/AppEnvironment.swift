@@ -8,11 +8,15 @@ import Foundation
 final class AppEnvironment {
     let backend: BackendClient
     let syncService: ScriptSyncService
+    /// App-lifetime on purpose: a take that finishes writing after the
+    /// recording screen is gone still has to reach the photo library.
+    let takeArchiver: TakeArchiver
     var currentUser: User?
 
     init(backend: BackendClient) {
         self.backend = backend
         self.syncService = ScriptSyncService(backend: backend)
+        self.takeArchiver = TakeArchiver(library: PhotoLibraryService())
     }
 
     func signIn(email: String, password: String) async throws {
