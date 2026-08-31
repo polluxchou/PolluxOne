@@ -108,12 +108,26 @@ enum PromptLineLayout {
             return proposed
 
         case .cjk:
+            // A Chinese script routinely carries Latin names — the app's own
+            // sample opens "Pollux One 从另一个问题出发" — and the CJK rule of
+            // "break between any two characters" cuts them in half. So a Latin
+            // word inside CJK gets the Latin treatment first: fall back to the
+            // word's start. Only when that would empty the line is the word
+            // cut, for the same reason as the Latin branch.
+            var candidate = proposed
+            if isLatinWord(characters[proposed]),
+               candidate > start,
+               isLatinWord(characters[candidate - 1]) {
+                var scan = candidate - 1
+                while scan > start, isLatinWord(characters[scan - 1]) { scan -= 1 }
+                if scan > start { candidate = scan }
+            }
+
             // Chinese breaks between any two characters, with two exceptions:
             // a line may not open with closing punctuation (行首禁则), and may
             // not close with opening punctuation (行尾禁则). Shift left at most
             // twice — a run of brackets must not loop, and two is enough for
             // every real case.
-            var candidate = proposed
             for _ in 0..<2 {
                 let opensBadly = noLineStart.contains(characters[candidate])
                 let closesBadly = candidate > start && noLineEnd.contains(characters[candidate - 1])
@@ -134,6 +148,14 @@ enum PromptLineLayout {
     private static let noLineEnd: Set<Character> = [
         "（", "［", "｛", "「", "『", "〈", "《", "“", "‘", "(", "[", "{"
     ]
+
+    /// What counts as "inside a word" when a Latin run appears in CJK text.
+    /// ASCII letters and digits only: breaking after a hyphen or a comma is
+    /// correct, and widening this to every non-CJK character would stop the
+    /// prompter from ever breaking a long run of punctuation.
+    private static func isLatinWord(_ character: Character) -> Bool {
+        character.isASCII && (character.isLetter || character.isNumber)
+    }
 
     private static func line(
         id: Int,

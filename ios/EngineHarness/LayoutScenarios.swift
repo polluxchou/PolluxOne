@@ -194,6 +194,32 @@ func runLayoutSuite() -> (pass: Int, fail: Int) {
     report.check(cjkLines.allSatisfy { !"。，、；：！？）」".contains($0.text.first ?? "字") },
                  "no line opens on closing punctuation")
 
+    report.section("line breaking — a Latin word inside a CJK script is not cut in half")
+
+    // The app's own sample script opens exactly like this, so this is the
+    // common case rather than an edge one.
+    let mixed = PromptScriptText.build(makeLayoutScript(["Pollux One 从另一个问题出发。"]))
+
+    report.check(mixed.language == .cjk,
+                 "a Chinese paragraph carrying a Latin product name is still CJK")
+
+    // 45pt at em 10: the width-driven break lands on the "e" of "One".
+    let mixedLines = PromptLineLayout.lines(for: mixed, width: 45, measurer: measurer)
+
+    report.check(mixedLines.first?.text == "Pollux ",
+                 "the break falls back to the start of the Latin word instead of splitting it",
+                 detail: "\(mixedLines.map(\.text))")
+    report.check(mixedLines.count > 1 && mixedLines[1].text.hasPrefix("One"),
+                 "so the next line opens on the whole word")
+
+    // A word wider than the whole column still has to be cut: falling back
+    // past the line's start would leave an empty line and cut it anyway.
+    let tooNarrow = PromptLineLayout.lines(for: mixed, width: 25, measurer: measurer)
+
+    report.check(tooNarrow.first?.text == "Pollu",
+                 "a Latin word wider than the column is still cut",
+                 detail: "\(tooNarrow.map(\.text))")
+
     report.section("line breaking — paragraph boundaries are hard")
 
     let twoParagraphs = PromptScriptText.build(makeLayoutScript(["短句。", "第二段开始。"]))
