@@ -236,5 +236,33 @@ func runArchiveSuite() async -> (pass: Int, fail: Int) {
                      detail: "\(library.requestCount) request(s)")
     }
 
+    report.section("back-to-back takes are archived one at a time")
+    do {
+        let library = FakePhotoLibrary(saveResult: .success("asset-seq"))
+        let observer = ArchiveObserver()
+        let archiver = TakeArchiver(library: library)
+        archiver.delegate = observer
+        let first = makeTakeFile("serial-1")
+        let second = makeTakeFile("serial-2")
+
+        archiver.archive(takeAt: first)
+        archiver.archive(takeAt: second)
+        await archiver.waitForPendingArchives()
+
+        report.check(library.savedURLs == [first, second],
+                     "handed over in the order they were recorded",
+                     detail: "\(library.savedURLs.map(\.lastPathComponent))")
+        report.check(!takeFileExists(first) && !takeFileExists(second),
+                     "both working copies are gone")
+        report.check(observer.states == [
+                        .saving, .saved(assetIdentifier: "asset-seq"),
+                        .saving, .saved(assetIdentifier: "asset-seq")
+                     ],
+                     "the second take starts only after the first reports saved",
+                     detail: "\(observer.states)")
+        report.check(archiver.state == .saved(assetIdentifier: "asset-seq"),
+                     "the HUD ends up describing the most recent take")
+    }
+
     return (report.pass, report.fail)
 }
