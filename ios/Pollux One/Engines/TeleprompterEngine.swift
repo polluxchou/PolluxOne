@@ -52,6 +52,14 @@ struct TeleprompterDisplayState: Equatable {
 /// `TeleprompterDisplayState` would re-diff every `Text` in the script 30
 /// times a second.
 ///
+/// The split only pays off if each property is read in the body of the view
+/// that draws it. The dependency is registered against whichever body
+/// performed the read, so a parent that reads `inLineProgress` and hands the
+/// value down invalidates itself — and everything it rebuilds — thirty times a
+/// second, which is the split undone one hop from the finish line. That is
+/// exactly what `RecordingView` did on this branch's first pass. Hand this
+/// object to a view; do not hand a view the value.
+///
 /// The measurer is injected rather than constructed here so this stays free of
 /// UIKit and can run in `scripts/test-engines.sh`.
 @MainActor

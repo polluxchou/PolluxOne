@@ -13,11 +13,24 @@ import SwiftUI
 /// Three layers, bottom to top: the fixed band (with the read-so-far fill),
 /// the scrolling text, the progress rail.
 struct TeleprompterOverlayView: View {
-    let state: TeleprompterDisplayState
-    /// 0...1 along the current line. Separate from `state` so a 30Hz change
-    /// invalidates only the fill — see `TeleprompterEngine`.
-    var inLineProgress: Double = 0
-    var progressFraction: Double = 0
+    /// The engine itself, not values read off it.
+    ///
+    /// This used to take `state`, `inLineProgress` and `progressFraction` as
+    /// three separate values, and `RecordingView` read all three inside its own
+    /// `body`. `@Observable` registers a dependency against whichever body
+    /// performed the read, so the two 30Hz properties invalidated the entire
+    /// recording screen: measured, 10 changes to `inLineProgress` produced 10
+    /// runs of `RecordingView.body` and 10 of this one, which reconstructed the
+    /// whole-script `ForEach` each time. (This view carries closures, so
+    /// SwiftUI cannot equate it and cannot skip it.) The engine was split into
+    /// three properties at three different rates precisely to avoid that, and
+    /// reading them one hop too early handed the split straight back.
+    ///
+    /// Passing the object instead lets each read happen in the smallest view
+    /// that needs it: the fill in `HighlightBandView`, the rail in
+    /// `ProgressRailView`, and the line window here. Same 10 changes after the
+    /// change: 0 parent bodies, 0 overlay bodies, 10 band bodies.
+    let engine: TeleprompterEngine
     var textSize: CGFloat = 20
     var micLevel: Float = 0
     /// Only used to warn: the prompter's whole premise is that it sits beside
@@ -47,6 +60,11 @@ struct TeleprompterOverlayView: View {
     /// off the side of the screen with the band and the mic bar following it
     /// out. That is exactly what the first simulator run showed.
     @State private var offeredWidth: CGFloat = 0
+
+    /// The line window. Changes once per scroll step, so reading it in this
+    /// body — rather than in `RecordingView`'s — keeps a line advance from
+    /// rebuilding the whole screen alongside the prompter.
+    private var state: TeleprompterDisplayState { engine.displayState }
 
     private let railColumnWidth: CGFloat = 22
     private let railGap: CGFloat = 6
@@ -161,7 +179,13 @@ struct TeleprompterOverlayView: View {
                 // column is — and both used to paint a bare two-row bronze
                 // rectangle onto the camera picture.
                 if !state.lines.isEmpty {
-                    band
+                    HighlightBandView(
+                        engine: engine,
+                        line: currentLine,
+                        pitch: pitch,
+                        bandTop: bandTop,
+                        textInset: textInset
+                    )
                 }
                 scrollingLines
             }
@@ -173,7 +197,7 @@ struct TeleprompterOverlayView: View {
             .clipped()
 
             ProgressRailView(
-                fraction: progressFraction,
+                engine: engine,
                 bandTop: bandTop,
                 bandHeight: pitch * 2
             )
@@ -184,25 +208,6 @@ struct TeleprompterOverlayView: View {
             // breaker was never told about.
             .opacity(state.lines.isEmpty ? 0 : 1)
         }
-    }
-
-    /// The band, drawn *behind* the text and never moved. Its first row also
-    /// carries the read-so-far fill.
-    private var band: some View {
-        ZStack(alignment: .topLeading) {
-            HUDColor.bronze.opacity(0.55)
-
-            // 0.44 over 0.55 composites to about 0.75 — the spec's figure for
-            // the consumed part of the line.
-            Rectangle()
-                .fill(HUDColor.bronze.opacity(0.44))
-                .frame(width: highlightWidth, height: pitch)
-                .animation(.linear(duration: 1.0 / 30.0), value: highlightWidth)
-        }
-        .frame(height: pitch * 2)
-        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-        .offset(y: bandTop)
-        .allowsHitTesting(false)
     }
 
     /// Every line in the script, moved as one block.
@@ -268,23 +273,6 @@ struct TeleprompterOverlayView: View {
         return state.lines[state.currentLineIndex]
     }
 
-    /// Where the read/unread boundary sits, in points.
-    ///
-    /// Read off `characterXOffsets` rather than computed as
-    /// `inLineProgress × lineWidth`: in Latin, "i" and "W" are not the same
-    /// fraction of a line, so a proportional edge visibly jitters as it
-    /// crosses them.
-    private var highlightWidth: CGFloat {
-        guard let line = currentLine, line.characterCount > 0 else { return 0 }
-        let clamped = min(max(inLineProgress, 0), 1)
-        let index = min(
-            Int((clamped * Double(line.characterCount)).rounded(.down)),
-            line.characterXOffsets.count - 1
-        )
-        guard index > 0 else { return 0 }
-        return textInset + line.characterXOffsets[index]
-    }
-
     /// Roles are a function of distance from the current line, which is what
     /// makes the band's position a constant.
     private func opacity(of line: PromptLine) -> Double {
@@ -302,6 +290,60 @@ struct TeleprompterOverlayView: View {
     }
 }
 
+/// The band, drawn *behind* the text and never moved. Its first row also
+/// carries the read-so-far fill.
+///
+/// A separate `View` rather than a computed property on the overlay, and that
+/// is the whole reason it exists as a type: it reads `inLineProgress` — which
+/// changes 30 times a second — inside its own `body`, so that is the only body
+/// the change invalidates. As a computed property its read happened during the
+/// overlay's body, which took the whole-script `ForEach` down with it.
+///
+/// `line` and the metrics come in as values because they are line-rate: the
+/// overlay already depends on `displayState` for the row it draws, and passing
+/// them keeps this view's own dependency down to the one fast property.
+private struct HighlightBandView: View {
+    let engine: TeleprompterEngine
+    let line: PromptLine?
+    let pitch: CGFloat
+    let bandTop: CGFloat
+    let textInset: CGFloat
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            HUDColor.bronze.opacity(0.55)
+
+            // 0.44 over 0.55 composites to about 0.75 — the spec's figure for
+            // the consumed part of the line.
+            Rectangle()
+                .fill(HUDColor.bronze.opacity(0.44))
+                .frame(width: highlightWidth, height: pitch)
+                .animation(.linear(duration: 1.0 / 30.0), value: highlightWidth)
+        }
+        .frame(height: pitch * 2)
+        .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .offset(y: bandTop)
+        .allowsHitTesting(false)
+    }
+
+    /// Where the read/unread boundary sits, in points.
+    ///
+    /// Read off `characterXOffsets` rather than computed as
+    /// `inLineProgress × lineWidth`: in Latin, "i" and "W" are not the same
+    /// fraction of a line, so a proportional edge visibly jitters as it
+    /// crosses them.
+    private var highlightWidth: CGFloat {
+        guard let line, line.characterCount > 0 else { return 0 }
+        let clamped = min(max(engine.inLineProgress, 0), 1)
+        let index = min(
+            Int((clamped * Double(line.characterCount)).rounded(.down)),
+            line.characterXOffsets.count - 1
+        )
+        guard index > 0 else { return 0 }
+        return textInset + line.characterXOffsets[index]
+    }
+}
+
 /// Whole-script progress down the right edge, with a bracket marking the two
 /// rows the reader is meant to be on.
 ///
@@ -311,10 +353,17 @@ struct TeleprompterOverlayView: View {
 /// window stopped moving. Global progress is strictly more information: the
 /// old rail could only say where the current sentence sat inside the visible
 /// rows, which is now a constant.
+///
+/// Takes the engine and reads `readingProgress` in its own body, for the same
+/// reason as `HighlightBandView`: the fraction changes 30 times a second, and
+/// as a value passed down from `RecordingView` it invalidated that whole body
+/// instead of this one.
 private struct ProgressRailView: View {
-    let fraction: Double
+    let engine: TeleprompterEngine
     let bandTop: CGFloat
     let bandHeight: CGFloat
+
+    private var fraction: Double { engine.readingProgress.fractionComplete }
 
     var body: some View {
         GeometryReader { geo in

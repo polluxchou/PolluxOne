@@ -150,10 +150,21 @@ struct RecordingView: View {
             .padding(.horizontal, 18)
             .topAnchored(Offset.statusRowTop)
 
+            // The engine, not values read off it. `@Observable` registers a
+            // dependency against whichever body performed the read, so reading
+            // `inLineProgress` and `readingProgress` here made two 30Hz
+            // properties invalidate all of this body — and with it the overlay,
+            // which carries closures and so cannot be equated away, and with
+            // that the whole-script ForEach inside it. Measured: 10 changes to
+            // `inLineProgress` produced 10 runs of this body and 10 of the
+            // overlay's. The engine splits those two out from `displayState`
+            // precisely so they invalidate only the fill and the rail; passing
+            // pre-read values handed that split straight back.
+            //
+            // `teleprompterEngine` and `sessionManager` are both `let`, which
+            // `@Observable` does not track, so naming them here costs nothing.
             TeleprompterOverlayView(
-                state: viewModel.sessionManager.teleprompterEngine.displayState,
-                inLineProgress: viewModel.sessionManager.teleprompterEngine.inLineProgress,
-                progressFraction: viewModel.sessionManager.teleprompterEngine.readingProgress.fractionComplete,
+                engine: viewModel.sessionManager.teleprompterEngine,
                 textSize: viewModel.teleprompterSettings.textSize,
                 micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
                 cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
