@@ -21,7 +21,6 @@ struct PromptLine: Equatable, Identifiable {
     let characterXOffsets: [CGFloat]
 
     var characterCount: Int { characterRange.count }
-    var width: CGFloat { characterXOffsets.last ?? 0 }
 }
 
 /// Supplies glyph advances. **Measures only — it does not break lines.**

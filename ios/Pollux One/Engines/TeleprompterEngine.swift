@@ -194,19 +194,35 @@ final class TeleprompterEngine {
 
     // MARK: - Derivation
 
+    /// Nothing here locates the cursor itself: it hands the new lines to
+    /// `refresh(lines:)`, which is the one place that does. This used to assign
+    /// the state with a line index it had looked up, then call `refresh()`,
+    /// which looked the same index up again from the state it had just written
+    /// and assigned a second time — two binary searches and two assignments per
+    /// re-layout, with the equality guard quietly absorbing the duplicate.
     private func rebuildLines() {
         guard let source, let measurer, layoutWidth > 0 else {
-            assign(lines: [], currentLineIndex: 0)
+            refresh(lines: [])
             return
         }
-        let lines = PromptLineLayout.lines(for: source, width: layoutWidth, measurer: measurer)
-        assign(lines: lines, currentLineIndex: lineIndex(containing: Int(pacer.cursor), in: lines))
-        refresh()
+        refresh(lines: PromptLineLayout.lines(for: source, width: layoutWidth, measurer: measurer))
     }
 
+    /// Re-derive everything from the cursor, against the lines already laid
+    /// out. What a tick or an alignment result needs.
     private func refresh() {
-        let lines = displayState.lines
+        refresh(lines: displayState.lines)
+    }
+
+    /// Re-derive everything from the cursor against `lines`, and publish both.
+    /// The single writer of the line window, so `rebuildLines` does not have to
+    /// locate the cursor a second time to hand new lines over.
+    private func refresh(lines: [PromptLine]) {
         guard !lines.isEmpty else {
+            // Written rather than left alone: a script that lost its text, or
+            // one whose measurer disagreed with it, must not leave the previous
+            // pass's rows on screen.
+            assign(lines: [], currentLineIndex: 0)
             inLineProgress = 0
             return
         }

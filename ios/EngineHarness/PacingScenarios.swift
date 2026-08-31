@@ -351,6 +351,28 @@ func runPacingSuite() -> (pass: Int, fail: Int) {
                  "an address matching neither a sentence nor a paragraph is the one case that starts over",
                  detail: "\(strandedEngine.cursorOffset)")
 
+    report.section("an empty layout is published, not left stale")
+
+    // `rebuildLines` hands its lines to `refresh` rather than locating the
+    // cursor itself, so the path that used to clear the window explicitly now
+    // goes through the same writer. It still has to clear.
+    let clearingEngine = TeleprompterEngine()
+    clearingEngine.load(script: windowScript)
+    clearingEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+
+    report.check(!clearingEngine.displayState.lines.isEmpty,
+                 "the window starts with rows in it",
+                 detail: "\(clearingEngine.displayState.lines.count) lines")
+
+    clearingEngine.load(script: makeLayoutScript([]))
+
+    report.check(clearingEngine.displayState.lines.isEmpty,
+                 "loading a script with no text leaves no rows behind — a stale row would be drawn over the picture")
+    report.check(clearingEngine.displayState.currentLineIndex == 0,
+                 "and the window index goes with them")
+    report.check(clearingEngine.inLineProgress == 0,
+                 "and there is no in-line progress along a line that does not exist")
+
     report.section("Latin gets six rows and two history rows")
 
     let latinEngine = TeleprompterEngine()
