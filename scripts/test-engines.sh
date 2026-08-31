@@ -24,6 +24,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/SentenceSplitter.swift" \
   "$IOS/Domain/ScriptLanguage.swift" \
   "$IOS/Domain/PromptScriptText.swift" \
+  "$IOS/Domain/PromptLineLayout.swift" \
   "$IOS/Domain/TextTokenizer.swift" \
   "$IOS/Domain/VoiceCommand.swift" \
   "$IOS/Domain/TakeArchive.swift" \
@@ -32,6 +33,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Engines/VoiceCommandEngine.swift" \
   "$IOS/Engines/TakeArchiver.swift" \
   ios/EngineHarness/Harness.swift \
+  ios/EngineHarness/FakeTextMeasurer.swift \
   ios/EngineHarness/AlignmentScenarios.swift \
   ios/EngineHarness/VoiceScenarios.swift \
   ios/EngineHarness/CameraScenarios.swift \
