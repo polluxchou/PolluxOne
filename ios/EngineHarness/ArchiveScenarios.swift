@@ -9,6 +9,72 @@ import Foundation
 // mock's call count, and they pin the exact wording the HUD shows, since that
 // line is the only thing that tells a user a take did not make it.
 
+/// Scriptable stand-in for the real Photos wrapper.
+@MainActor
+final class FakePhotoLibrary: PhotoLibrarySaving {
+    var permission: PhotoLibraryAddPermission
+    var permissionAfterRequest: PhotoLibraryAddPermission
+    var saveResult: Result<String, Error>
+
+    private(set) var requestCount = 0
+    private(set) var savedURLs: [URL] = []
+
+    init(
+        permission: PhotoLibraryAddPermission = .granted,
+        permissionAfterRequest: PhotoLibraryAddPermission = .granted,
+        saveResult: Result<String, Error> = .success("asset-1")
+    ) {
+        self.permission = permission
+        self.permissionAfterRequest = permissionAfterRequest
+        self.saveResult = saveResult
+    }
+
+    func currentAddPermission() -> PhotoLibraryAddPermission { permission }
+
+    func requestAddPermission() async -> PhotoLibraryAddPermission {
+        requestCount += 1
+        permission = permissionAfterRequest
+        return permission
+    }
+
+    func saveVideo(at url: URL) async throws -> String {
+        savedURLs.append(url)
+        return try saveResult.get()
+    }
+}
+
+struct FakeSaveError: LocalizedError {
+    var errorDescription: String? { "disk full" }
+}
+
+/// Records the state sequence the delegate is told about, so ordering is
+/// assertable and not just the final value.
+@MainActor
+final class ArchiveObserver: TakeArchiverDelegate {
+    private(set) var states: [TakeArchiveState] = []
+
+    func takeArchiver(_ archiver: TakeArchiver, didUpdate state: TakeArchiveState) {
+        states.append(state)
+    }
+}
+
+/// Writes a real, tiny file so "was it deleted?" is a real question rather
+/// than a mock assertion.
+@MainActor
+func makeTakeFile(_ name: String) -> URL {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent("pollux-archive-test-\(name)")
+        .appendingPathExtension("mov")
+    try? FileManager.default.removeItem(at: url)
+    FileManager.default.createFile(atPath: url.path, contents: Data("take".utf8))
+    return url
+}
+
+@MainActor
+func takeFileExists(_ url: URL) -> Bool {
+    FileManager.default.fileExists(atPath: url.path)
+}
+
 @MainActor
 func runArchiveSuite() async -> (pass: Int, fail: Int) {
     let report = Report()
@@ -44,6 +110,30 @@ func runArchiveSuite() async -> (pass: Int, fail: Int) {
                     state: .failed(.saveFailed("disk full"), retainedFileURL: nil), permission: .granted)
                     == "Save failed — disk full",
                  "the underlying reason reaches the user verbatim")
+
+    report.section("a saved take leaves no working copy behind")
+    do {
+        let library = FakePhotoLibrary(saveResult: .success("asset-42"))
+        let observer = ArchiveObserver()
+        let archiver = TakeArchiver(library: library)
+        archiver.delegate = observer
+        let url = makeTakeFile("success")
+
+        archiver.archive(takeAt: url)
+        await archiver.waitForPendingArchives()
+
+        report.check(archiver.state == .saved(assetIdentifier: "asset-42"),
+                     "state carries the identifier the library handed back",
+                     detail: "\(archiver.state)")
+        report.check(library.savedURLs == [url],
+                     "the take was handed over exactly once",
+                     detail: "\(library.savedURLs.count) call(s)")
+        report.check(!takeFileExists(url),
+                     "the temporary file is gone once the library owns the take")
+        report.check(observer.states == [.saving, .saved(assetIdentifier: "asset-42")],
+                     "the delegate saw saving then saved, in that order",
+                     detail: "\(observer.states)")
+    }
 
     return (report.pass, report.fail)
 }
