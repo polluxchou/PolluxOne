@@ -27,6 +27,7 @@ final class SessionManager {
     private let syncService: ScriptSyncService
 
     private var currentRecordingSession: RecordingSession?
+    private var latestTranscriptText = ""
 
     init(syncService: ScriptSyncService, alignmentEngine: ScriptAlignmentEngine) {
         self.syncService = syncService
@@ -136,6 +137,10 @@ final class SessionManager {
 extension SessionManager: SpeechRecognitionServiceDelegate {
     nonisolated func speechRecognitionService(_ service: SpeechRecognitionService, didProduce transcript: SpeechTranscript) {
         Task { @MainActor in
+            // Recorded before the detector runs: if the safe word fires on
+            // this transcript, VoiceCommandEngine needs the text as it stood
+            // *before* it, so it parses only what follows the wake word.
+            latestTranscriptText = transcript.text
             safeWordDetector.ingest(transcript: transcript)
             voiceCommandEngine.ingest(transcript: transcript)
 
@@ -158,7 +163,10 @@ extension SessionManager: SafeWordDetectorDelegate {
     nonisolated func safeWordDetectorDidDetectSafeWord(_ detector: SafeWordDetector) {
         Task { @MainActor in
             guard let paragraphId = currentParagraphId() else { return }
-            voiceCommandEngine.beginListening(currentParagraphId: paragraphId)
+            voiceCommandEngine.beginListening(
+                currentParagraphId: paragraphId,
+                spokenTextSoFar: latestTranscriptText
+            )
         }
     }
 }

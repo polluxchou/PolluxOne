@@ -6,9 +6,9 @@ import Testing
 /// the recognizer never emits — checked without a camera or microphone, since
 /// alignment is pure data in / data out.
 ///
-/// The same scenarios also run headlessly via `scripts/test-alignment.sh`,
-/// which compiles the Domain + engine sources directly. Keep the two in sync
-/// when adding cases.
+/// Every case here also runs headlessly via `scripts/test-engines.sh`, which
+/// compiles the Domain + engine sources directly and needs no test target.
+/// Keep the two in sync when adding cases.
 @MainActor
 struct ScriptAlignmentEngineTests {
 
@@ -237,5 +237,229 @@ struct TextTokenizerTests {
 
     @Test func handlesMixedScript() {
         #expect(TextTokenizer.tokens(in: "Pollux One 从这里开始") == ["pollux", "one", "从", "这", "里", "开", "始"])
+    }
+}
+
+// MARK: - Feature 4: Safe Word -> Voice Command
+//
+// What these really guard is the *shape* of recognizer output: a cumulative
+// transcript that grows character by character and gets revised. Both engines
+// reason about "what's new", which is where this pipeline is easiest to break
+// in ways a device demo hides.
+
+@MainActor
+private final class SafeWordSpy: SafeWordDetectorDelegate {
+    var triggerCount = 0
+    func safeWordDetectorDidDetectSafeWord(_ detector: SafeWordDetector) { triggerCount += 1 }
+}
+
+@MainActor
+private final class VoiceCommandSpy: VoiceCommandEngineDelegate {
+    var confirmed: [VoiceCommand] = []
+    func voiceCommandEngine(_ engine: VoiceCommandEngine, didChangeState state: VoiceCommandEngineState) {}
+    func voiceCommandEngine(_ engine: VoiceCommandEngine, didConfirm command: VoiceCommand) {
+        confirmed.append(command)
+    }
+}
+
+@MainActor
+struct SafeWordDetectorTests {
+    private let start = Date(timeIntervalSince1970: 1_000_000)
+
+    private func makeDetector() -> (SafeWordDetector, SafeWordSpy) {
+        let detector = SafeWordDetector()
+        let spy = SafeWordSpy()
+        detector.delegate = spy
+        detector.reset()
+        return (detector, spy)
+    }
+
+    /// The bug this exists to prevent: recognizers deliver partials one
+    /// character at a time, so searching only the newly-appended slice splits
+    /// the word ("pol" | "l" | "ux") and it never matches at all.
+    @Test func firesOnceWhenTheWordArrivesAsGrowingPartials() {
+        let (detector, spy) = makeDetector()
+        let phrase = "pollux"
+        for endIndex in 1...phrase.count {
+            detector.ingest(
+                transcript: SpeechTranscript(
+                    text: "and so we begin " + phrase.prefix(endIndex),
+                    isFinal: endIndex == phrase.count,
+                    timestamp: start.addingTimeInterval(Double(endIndex) * 0.1)
+                )
+            )
+        }
+        #expect(spy.triggerCount == 1)
+    }
+
+    @Test func firesOnceWhenDeliveredWhole() {
+        let (detector, spy) = makeDetector()
+        detector.ingest(transcript: SpeechTranscript(text: "and so we begin pollux", isFinal: true, timestamp: start))
+        #expect(spy.triggerCount == 1)
+    }
+
+    @Test func stillDetectsAfterTheTranscriptIsRevisedShorter() {
+        let (detector, spy) = makeDetector()
+        detector.ingest(transcript: SpeechTranscript(text: "some longer guess here", isFinal: false, timestamp: start))
+        detector.ingest(transcript: SpeechTranscript(text: "pollux", isFinal: true, timestamp: start.addingTimeInterval(0.3)))
+        #expect(spy.triggerCount == 1)
+    }
+
+    @Test func collapsesRepeatedReportsOfOneUtterance() {
+        let (detector, spy) = makeDetector()
+        for step in 0..<8 {
+            detector.ingest(
+                transcript: SpeechTranscript(
+                    text: "pollux change this to hello",
+                    isFinal: false,
+                    timestamp: start.addingTimeInterval(Double(step) * 0.2)
+                )
+            )
+        }
+        #expect(spy.triggerCount == 1)
+    }
+
+    @Test func firesTwiceWhenSaidTwiceFarApart() {
+        let (detector, spy) = makeDetector()
+        detector.ingest(transcript: SpeechTranscript(text: "pollux", isFinal: true, timestamp: start))
+        detector.ingest(
+            transcript: SpeechTranscript(
+                text: "pollux and later pollux",
+                isFinal: true,
+                timestamp: start.addingTimeInterval(30)
+            )
+        )
+        #expect(spy.triggerCount == 2)
+    }
+
+    @Test func neverFiresOnOrdinaryReading() {
+        let (detector, spy) = makeDetector()
+        detector.ingest(
+            transcript: SpeechTranscript(
+                text: "most teleprompters solve the wrong problem",
+                isFinal: true,
+                timestamp: start
+            )
+        )
+        #expect(spy.triggerCount == 0)
+    }
+
+    @Test func isCaseInsensitive() {
+        let (detector, spy) = makeDetector()
+        detector.ingest(transcript: SpeechTranscript(text: "okay Pollux, listen", isFinal: true, timestamp: start))
+        #expect(spy.triggerCount == 1)
+    }
+}
+
+@MainActor
+struct VoiceCommandEngineTests {
+    private let start = Date(timeIntervalSince1970: 1_000_000)
+    private let paragraphId = UUID()
+
+    private func makeEngine() -> (VoiceCommandEngine, VoiceCommandSpy) {
+        let engine = VoiceCommandEngine()
+        let spy = VoiceCommandSpy()
+        engine.delegate = spy
+        return (engine, spy)
+    }
+
+    private func proposedText(of engine: VoiceCommandEngine) -> String? {
+        guard case .awaitingConfirmation(let command) = engine.state,
+              case .replaceParagraph(_, let newText) = command.kind else { return nil }
+        return newText
+    }
+
+    @Test func extractsTheReplacementText() {
+        let (engine, _) = makeEngine()
+        let before = "we have been reading for a while pollux"
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: before)
+        engine.ingest(
+            transcript: SpeechTranscript(
+                text: before + " change this to we solve eye contact",
+                isFinal: true,
+                timestamp: start
+            )
+        )
+        #expect(proposedText(of: engine) == "we solve eye contact")
+    }
+
+    /// Transcripts are cumulative, so parsing the whole thing picks up a
+    /// trigger phrase spoken earlier — including one inside the script.
+    @Test func ignoresATriggerPhraseSpokenEarlierInTheTake() {
+        let (engine, _) = makeEngine()
+        let before = "earlier i said change this to something bogus and kept reading pollux"
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: before)
+        engine.ingest(
+            transcript: SpeechTranscript(
+                text: before + " change this to the real replacement",
+                isFinal: true,
+                timestamp: start
+            )
+        )
+        #expect(proposedText(of: engine) == "the real replacement")
+    }
+
+    /// "Pollux… uh, never mind" must not put a confirmation sheet carrying
+    /// junk over the camera preview.
+    @Test func doesNotProposeAnythingForUnparseableSpeech() {
+        let (engine, _) = makeEngine()
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: "pollux")
+        engine.ingest(transcript: SpeechTranscript(text: "pollux uh never mind sorry", isFinal: true, timestamp: start))
+        #expect(engine.state == .idle)
+    }
+
+    @Test func waitsForAFinalResult() {
+        let (engine, _) = makeEngine()
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: "pollux")
+        engine.ingest(transcript: SpeechTranscript(text: "pollux change this to we sol", isFinal: false, timestamp: start))
+        #expect(engine.state == .listeningForCommand)
+    }
+
+    @Test func timesOutWhenNoCommandArrives() {
+        let (engine, _) = makeEngine()
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: "pollux", now: start)
+        engine.ingest(
+            transcript: SpeechTranscript(
+                text: "pollux and then i kept reading",
+                isFinal: true,
+                timestamp: start.addingTimeInterval(60)
+            )
+        )
+        #expect(engine.state == .idle)
+    }
+
+    @Test func appliesAConfirmedCommandExactlyOnce() {
+        let (engine, spy) = makeEngine()
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: "pollux")
+        engine.ingest(
+            transcript: SpeechTranscript(text: "pollux replace this with a shorter line", isFinal: true, timestamp: start)
+        )
+        engine.confirm()
+        engine.confirm()
+        #expect(spy.confirmed.count == 1)
+    }
+
+    @Test func rejectingClearsThePendingCommand() {
+        let (engine, spy) = makeEngine()
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: "pollux")
+        engine.ingest(
+            transcript: SpeechTranscript(text: "pollux replace this with something", isFinal: true, timestamp: start)
+        )
+        engine.reject()
+        #expect(engine.state == .idle)
+        #expect(spy.confirmed.isEmpty)
+    }
+
+    @Test func understandsChineseReplacementCommands() {
+        let (engine, _) = makeEngine()
+        engine.beginListening(currentParagraphId: paragraphId, spokenTextSoFar: "小北")
+        engine.ingest(
+            transcript: SpeechTranscript(
+                text: "小北 把这段改成 我们真正解决的是镜头交流",
+                isFinal: true,
+                timestamp: start
+            )
+        )
+        #expect(proposedText(of: engine) == "我们真正解决的是镜头交流")
     }
 }

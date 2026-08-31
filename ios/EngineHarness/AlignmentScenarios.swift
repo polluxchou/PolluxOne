@@ -1,6 +1,6 @@
 import Foundation
 
-// Offline harness for ScriptAlignmentEngine, run by scripts/test-alignment.sh.
+// Offline harness for ScriptAlignmentEngine, run by scripts/test-engines.sh.
 //
 // Alignment is the product's core: speech in, reading position out, pure data
 // either way. This compiles the real Domain + engine sources (no shims, no
@@ -29,47 +29,7 @@ func makeScript(_ paragraphs: [String], title: String) -> Script {
 }
 
 @MainActor
-struct Scenario {
-    let name: String
-    /// Cumulative transcripts, as a recognizer would emit them.
-    let utterances: [String]
-    /// Index into script.allSentences we expect to land on after each step.
-    let expected: [Int]
-}
-
-@MainActor
-func run(script: Script, scenarios: [Scenario], label: String) -> (pass: Int, fail: Int) {
-    let sentences = script.allSentences
-    print("\n══════ \(label) ══════")
-    print("script has \(sentences.count) sentences:")
-    for (i, s) in sentences.enumerated() { print("  [\(i)] \(s.text)") }
-
-    var pass = 0, fail = 0
-    for scenario in scenarios {
-        let engine = SlidingWindowAlignmentEngine()
-        engine.reset(script: script, startingAt: nil)
-        print("\n── \(scenario.name)")
-        var cumulative = ""
-        for (step, utterance) in scenario.utterances.enumerated() {
-            cumulative = cumulative.isEmpty ? utterance : cumulative + " " + utterance
-            let position = engine.ingest(
-                transcript: SpeechTranscript(text: cumulative, isFinal: false)
-            )
-            let landedIndex = position.flatMap { p in
-                sentences.firstIndex { $0.id == p.address.sentenceId }
-            }
-            let want = scenario.expected[step]
-            let ok = landedIndex == want
-            if ok { pass += 1 } else { fail += 1 }
-            let conf = position.map { String(format: "%.2f", $0.confidence) } ?? "nil"
-            print("   \(ok ? "✓" : "✗") said “\(utterance)”  →  got \(landedIndex.map(String.init) ?? "nil") want \(want)  (conf \(conf))")
-        }
-    }
-    return (pass, fail)
-}
-
-@MainActor
-func runAll() {
+func runAlignmentSuite() -> (pass: Int, fail: Int) {
     var totalPass = 0, totalFail = 0
 
     // ── English ────────────────────────────────────────────────────────────
@@ -220,7 +180,6 @@ func runAll() {
     let advResult = run(script: en, scenarios: adversarial, label: "ADVERSARIAL (EN)")
     totalPass += advResult.pass; totalFail += advResult.fail
 
-    print("\n══════ TOTAL: \(totalPass) passed, \(totalFail) failed ══════")
+    return (totalPass, totalFail)
 }
 
-MainActor.assumeIsolated { runAll() }

@@ -120,16 +120,18 @@ schema 已经在本地临时 Postgres 17 实例（stub 了 `auth` schema）跑�
 
 ## 测试
 
-Reading-following 是产品的命门，而它的输入输出都是纯数据（Script + 语音
-transcript → ReadingPosition），所以不需要摄像头/麦克风就能验证：
+提词跟随和安全词是产品的命门，而它们的输入输出都是纯数据（Script + 语音
+transcript → ReadingPosition / VoiceCommand），所以不需要摄像头和麦克风就能
+验证：
 
 ```bash
-./scripts/test-alignment.sh
+./scripts/test-engines.sh
 ```
 
-这个脚本直接用 `swiftc` 编译真实的 Domain + `ScriptAlignmentEngine` 源码
-（不是 mock），跑 36 个朗读场景并打印每一步的置信度；有任何一例失败就返回
-非零，可以直接当 CI 门禁用。覆盖的行为：
+这个脚本直接用 `swiftc` 编译真实的 Domain + 三个引擎源码（不是 mock），跑 51
+个场景并打印每一步的置信度；有任何一例失败就返回非零，可以直接当 CI 门禁用。
+
+**提词跟随**（`ScriptAlignmentEngine`）：
 
 | 场景 | 中文 | 英文 |
 |---|---|---|
@@ -144,6 +146,25 @@ transcript → ReadingPosition），所以不需要摄像头/麦克风就能验�
 | 无关说话/噪音（不能乱跑） | — | ✓ |
 | 长时间停顿 | — | ✓ |
 
+**安全词 + 语音指令**（`SafeWordDetector` / `VoiceCommandEngine`）：
+
+| 场景 |
+|---|
+| **安全词逐字增长送达**（`p`→`po`→`pol`…，识别器的真实行为） |
+| 安全词整句一次送达 |
+| 识别结果被修订变短后仍能检测 |
+| 同一次说话被反复上报（冷却期收敛成一次触发） |
+| 隔很久说第二次（应该触发两次） |
+| 正常念稿时绝不误触发 |
+| 大小写不敏感 |
+| 只解析安全词**之后**的话（不能抓到稿子里出现过的触发词） |
+| 说了安全词但后面没有有效指令 → 不弹确认框 |
+| partial 结果不提交指令 |
+| 指令一直不来会超时回到 idle |
+| 确认只生效一次（防重复点击） |
+| 取消后不留残留 |
+| 中文指令「把这段改成…」 |
+
 同一批场景也写成了 Swift Testing 版本放在
 `ios/Pollux OneTests/ScriptAlignmentEngineTests.swift`，等 Xcode 里加上 test
 target（File ▸ New ▸ Target ▸ Unit Testing Bundle）就能在 IDE 里跑。
@@ -153,10 +174,14 @@ Web 侧：`cd web && npm run lint && npm run build`。
 ## 当前状态
 
 **已完成、可验证：**
-- **iOS 提词跟随算法**：`ScriptAlignmentEngine` 36/36 场景通过（见上表），
-  中英双语。打分由两项组成——`coverage`（这句念了多少）+ `ownership`（刚说的
-  几个词属于哪句）。`ownership` 是关键：只用 coverage 的话，一句念完的旧句
-  会压过刚开始念的新句，导致高亮永远慢一句，正好是产品要解决问题的反面。
+- **iOS 提词跟随算法**：`ScriptAlignmentEngine` 全部场景通过，中英双语。
+  打分由两项组成——`coverage`（这句念了多少）+ `ownership`（刚说的几个词属于
+  哪句）。`ownership` 是关键：只用 coverage 的话，一句念完的旧句会压过刚开始
+  念的新句，导致高亮永远慢一句，正好是产品要解决问题的反面。
+- **安全词 + 语音指令**：`SafeWordDetector` / `VoiceCommandEngine` 全部场景
+  通过，含中文指令。检测按「安全词在整段 transcript 里出现了几次」计数，而不是
+  去 diff 新增文本——后者会被逐字增长的 partial 切碎（`pol` | `l` | `ux`），
+  在真机上等于永不触发。指令只解析安全词**之后**的文本。
 - **iOS Recording HUD**：完全按 Claude Design 的 `Pollux One iOS.dc.html`
   「04 · Recording — HUD」实现，位置用设计稿的绝对偏移量。已在 Simulator
   实测中英双稿渲染正确。
@@ -169,8 +194,8 @@ Web 侧：`cd web && npm run lint && npm run build`。
   影响，只有真机念稿子才知道。这是目前最大的未知。
 - iOS 还没接真实 Supabase（`MockBackendClient` → `SupabaseBackendClient`，
   接口已就位，改 `AppEnvironment` 一处即可）。
-- Voice Command 只是关键词匹配（"change this to…" 等几个固定短语），不是
-  意图理解。
+- Voice Command 是关键词匹配（`change this to…` / `把这段改成…` 等十几个
+  固定短语），不是意图理解；V1 也只实现了「替换当前段落」这一个指令。
 - 相机翻转是占位（V1 只用前置，符合眼神接触的定位）。
 - Web 还没展示 `script_reading_progress`（后端已建表）。
 - Xcode 里还没有 test target（测试文件已就位，见「测试」一节）。
@@ -184,7 +209,7 @@ Web 侧：`cd web && npm run lint && npm run build`。
 3. iOS 接 `supabase-swift`，实现 `SupabaseBackendClient`，打通 Web → iOS 同步。
 4. 根据真机结果调 `ScriptAlignmentEngine` 的 `lookBehind`/`lookAhead`/
    `recentTokenWindow`/`minimumConfidence`——每改一个参数都先跑
-   `./scripts/test-alignment.sh` 确认没有回退。
+   `./scripts/test-engines.sh` 确认没有回退。
 5. Safe Word → Voice Command 的解析做得更鲁棒。
 
 ## 当前最大的三个技术风险
