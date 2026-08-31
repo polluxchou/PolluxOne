@@ -158,5 +158,83 @@ func runArchiveSuite() async -> (pass: Int, fail: Int) {
         try? FileManager.default.removeItem(at: url)
     }
 
+    report.section("a refused library is a dead end, not a deleted take")
+    do {
+        let library = FakePhotoLibrary(permission: .denied, permissionAfterRequest: .denied)
+        let archiver = TakeArchiver(library: library)
+        let url = makeTakeFile("denied")
+
+        archiver.archive(takeAt: url)
+        await archiver.waitForPendingArchives()
+
+        report.check(archiver.state == .failed(.permissionDenied, retainedFileURL: url),
+                     "a denied grant is reported as denied, not as a save error",
+                     detail: "\(archiver.state)")
+        report.check(library.savedURLs.isEmpty,
+                     "the library is never called when the answer is already no")
+        report.check(library.requestCount == 0,
+                     "an already-answered grant is not asked again")
+        report.check(takeFileExists(url),
+                     "the take survives a refused grant")
+
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    report.section("a restricted library reads differently from a refused one")
+    do {
+        let library = FakePhotoLibrary(permission: .restricted, permissionAfterRequest: .restricted)
+        let archiver = TakeArchiver(library: library)
+        let url = makeTakeFile("restricted")
+
+        archiver.archive(takeAt: url)
+        await archiver.waitForPendingArchives()
+
+        report.check(archiver.state == .failed(.permissionRestricted, retainedFileURL: url),
+                     "restricted is its own outcome — the user cannot fix it in Settings",
+                     detail: "\(archiver.state)")
+        report.check(takeFileExists(url), "the take survives a restricted library")
+
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    report.section("an unanswered grant is asked for exactly once")
+    do {
+        let library = FakePhotoLibrary(permission: .notDetermined, permissionAfterRequest: .granted)
+        let archiver = TakeArchiver(library: library)
+        let first = makeTakeFile("undetermined-1")
+        let second = makeTakeFile("undetermined-2")
+
+        archiver.archive(takeAt: first)
+        archiver.archive(takeAt: second)
+        await archiver.waitForPendingArchives()
+
+        report.check(library.requestCount == 1,
+                     "the second take reuses the answer rather than re-prompting",
+                     detail: "\(library.requestCount) request(s)")
+        report.check(archiver.permission == .granted,
+                     "the archiver remembers what it was told")
+        report.check(library.savedURLs == [first, second],
+                     "both takes were saved once the grant arrived")
+    }
+
+    report.section("prepare() asks up front so a refusal costs no take")
+    do {
+        let library = FakePhotoLibrary(permission: .notDetermined, permissionAfterRequest: .denied)
+        let archiver = TakeArchiver(library: library)
+
+        await archiver.refreshPermission()
+
+        report.check(library.requestCount == 1, "refreshPermission asks once")
+        report.check(archiver.permission == .denied, "and records the answer")
+        report.check(TakeArchiveMessage.hudText(state: .idle, permission: archiver.permission)
+                        == "Photos access denied — takes won't be saved.",
+                     "so the HUD can warn before anything is recorded")
+
+        await archiver.refreshPermission()
+        report.check(library.requestCount == 1,
+                     "an already-answered grant is not re-prompted on the next screen",
+                     detail: "\(library.requestCount) request(s)")
+    }
+
     return (report.pass, report.fail)
 }

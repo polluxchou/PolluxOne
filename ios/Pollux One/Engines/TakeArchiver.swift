@@ -47,6 +47,15 @@ final class TakeArchiver {
         await drainTask?.value
     }
 
+    /// Called from SessionManager.prepare(), alongside the camera and speech
+    /// grants, so a user who says no finds out on arrival rather than after
+    /// burning a take.
+    func refreshPermission() async {
+        permission = library.currentAddPermission()
+        guard permission == .notDetermined else { return }
+        permission = await library.requestAddPermission()
+    }
+
     private func drain() async {
         while !queue.isEmpty {
             let url = queue.removeFirst()
@@ -59,6 +68,25 @@ final class TakeArchiver {
     }
 
     private func archiveNow(_ url: URL) async {
+        if permission == .notDetermined {
+            permission = await library.requestAddPermission()
+        }
+
+        switch permission {
+        case .denied:
+            update(.failed(.permissionDenied, retainedFileURL: url))
+            return
+        case .restricted:
+            update(.failed(.permissionRestricted, retainedFileURL: url))
+            return
+        case .granted:
+            break
+        case .notDetermined:
+            // The system never leaves a request unanswered; if it somehow did,
+            // attempting the write is better than silently discarding a take.
+            break
+        }
+
         update(.saving)
         do {
             let identifier = try await library.saveVideo(at: url)
