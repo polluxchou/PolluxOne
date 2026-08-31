@@ -29,13 +29,42 @@ struct TeleprompterOverlayView: View {
     /// metrics, so it owns the measurer.
     var onLayoutChange: (CGFloat, TextWidthMeasuring) -> Void
 
-    @State private var measuredWidth: CGFloat = 0
+    /// The width the overlay was *offered* — the one width the column can
+    /// safely be derived from, because nothing inside the overlay can change
+    /// it. Reported by `offeredWidthProbe`.
+    ///
+    /// This used to be the measured width of the container holding the text,
+    /// and that is worth spelling out because the obvious repair to anything
+    /// wrong here is to measure the container again. Every row in
+    /// `scrollingLines` carries `.fixedSize(horizontal: true, vertical: false)`
+    /// so that a line already broken by `PromptLineLayout` can never be
+    /// re-wrapped by SwiftUI — which makes that container's width the widest
+    /// line's *unwrapped* ideal width, not the column's. Feeding that back
+    /// into the line breaker closes a runaway loop: a wider width produces
+    /// fewer breaks, fewer breaks produce longer lines, longer lines report a
+    /// wider ideal width. It converges on breaking only at
+    /// `PromptScriptText.hardBreaks`, i.e. one line per paragraph, each running
+    /// off the side of the screen with the band and the mic bar following it
+    /// out. That is exactly what the first simulator run showed.
+    @State private var offeredWidth: CGFloat = 0
 
     private let railColumnWidth: CGFloat = 22
     private let railGap: CGFloat = 6
     /// Keeps glyphs off the band's rounded edge. Applied to the text and to
     /// the fill's origin, so the two stay in register.
     private let textInset: CGFloat = 7
+
+    /// The width `PromptLineLayout` breaks against: computed, never measured.
+    ///
+    /// The rail's column and the gap in front of it are constants, and
+    /// `textInset` is spent clearing the band's rounded edge, so what is left
+    /// for glyphs follows arithmetically from the offered width and cannot
+    /// depend on the text. The other side of that bargain is that the rail's
+    /// column has to stay in the `HStack` even when it draws nothing, or the
+    /// text would really have 28pt more room than this number claims.
+    private var columnWidth: CGFloat {
+        max(offeredWidth - railColumnWidth - railGap - textInset, 0)
+    }
 
     private var effectiveTextSize: CGFloat {
         state.language.effectiveTextSize(base: textSize)
@@ -77,12 +106,47 @@ struct TeleprompterOverlayView: View {
     var body: some View {
         if state.isVisible {
             VStack(alignment: .leading, spacing: 0) {
+                offeredWidthProbe
                 window
                 footer
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
+            // The column width changes on its own (the Width slider moves, the
+            // device rotates) and the *measurer* changes with the type size and
+            // the language, so all three have to reach the engine. The probe
+            // covers the first; these two cover the rest.
+            .onChange(of: effectiveTextSize) { _, _ in reportLayout() }
+            .onChange(of: state.language) { _, _ in reportLayout() }
         }
+    }
+
+    /// Reports the width the overlay was offered, and nothing else.
+    ///
+    /// `Color.clear` hands back exactly the width proposed to it — it has no
+    /// content whose size could enter the answer — and a `VStack` passes its
+    /// own horizontal proposal across to each child untouched. So this reads
+    /// `screenWidth × textWidthFraction`, the offer `RecordingView` makes with
+    /// `containerRelativeFrame`, no matter what the text is doing. That
+    /// immunity to content is the whole requirement; see `offeredWidth`.
+    ///
+    /// The design note reaches the same width with a `GeometryReader` wrapped
+    /// around the block. A `GeometryReader` is greedy on both axes, though, so
+    /// the block would claim every point below its 60pt anchor and the
+    /// `contentShape` above would start swallowing taps meant for
+    /// tap-to-focus. Pinning it to an explicit height means adding up the
+    /// window, the footer's padding and the mic bar's own height by hand, and
+    /// that sum goes stale the first time the footer gains a row. A zero-height
+    /// probe leaves the block's height and position exactly as they were.
+    private var offeredWidthProbe: some View {
+        Color.clear
+            .frame(height: 0)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                offeredWidth = width
+                reportLayout()
+            }
     }
 
     // MARK: - Window
@@ -92,29 +156,20 @@ struct TeleprompterOverlayView: View {
             ZStack(alignment: .topLeading) {
                 // No band with nothing on it. There are two ways to have no
                 // lines — a script with no text, and the one layout pass that
-                // happens before `onGeometryChange` has told the engine how
-                // wide the column is — and both used to paint a bare two-row
-                // bronze rectangle onto the camera picture.
-                //
-                // Only the drawing is skipped, never the frame around it: that
-                // geometry callback is the only thing that gives the engine a
-                // width, so a window that removed itself while empty would
-                // never be measured and the lines would never arrive.
+                // happens before the probe has told the engine how wide the
+                // column is — and both used to paint a bare two-row bronze
+                // rectangle onto the camera picture.
                 if !state.lines.isEmpty {
                     band
                 }
                 scrollingLines
             }
             .frame(height: windowHeight, alignment: .top)
+            // A backstop, not the mechanism: `scrollingLines` is pinned to
+            // `columnWidth`, so reaching this needs a row with no break point
+            // in it at all (one very long unbroken token). Such a row is cut
+            // at the column's edge, not at the screen's.
             .clipped()
-            .onGeometryChange(for: CGFloat.self) { proxy in
-                proxy.size.width
-            } action: { width in
-                measuredWidth = width
-                reportLayout()
-            }
-            .onChange(of: effectiveTextSize) { _, _ in reportLayout() }
-            .onChange(of: state.language) { _, _ in reportLayout() }
 
             ProgressRailView(
                 fraction: progressFraction,
@@ -122,10 +177,10 @@ struct TeleprompterOverlayView: View {
                 bandHeight: pitch * 2
             )
             .frame(width: railColumnWidth, height: windowHeight)
-            // Faded rather than dropped, for the same reason the band keeps its
-            // frame: taking the rail's column out of the HStack would widen the
-            // text column, which would report a wider layout, produce lines,
-            // bring the rail back and narrow the column again.
+            // Faded rather than dropped: `columnWidth` subtracts this column
+            // unconditionally, so a rail that took its own space out of the
+            // HStack while empty would leave the text 28pt of room the line
+            // breaker was never told about.
             .opacity(state.lines.isEmpty ? 0 : 1)
         }
     }
@@ -169,8 +224,13 @@ struct TeleprompterOverlayView: View {
                     .shadow(color: .black.opacity(0.65), radius: 5, y: 1)
             }
         }
+        // Pinned to the same width the lines were broken against, so a line
+        // that overruns the column is structurally impossible to draw past it —
+        // the previous `maxWidth: .infinity` let the rows' `fixedSize` widths
+        // decide the column's own width, which is the loop described on
+        // `offeredWidth`.
+        .frame(width: columnWidth, alignment: .leading)
         .padding(.leading, textInset)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .offset(y: -CGFloat(state.currentLineIndex - state.readRowsAbove) * pitch)
         // Whole-row snapping: the offset changes by exactly one pitch per step.
         // At the start of a script this offset is positive, which drops the
@@ -182,12 +242,15 @@ struct TeleprompterOverlayView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            // Sized from the measured column, not `containerRelativeFrame`:
-            // that resolves against the screen, and the column is now
-            // narrowed by textWidthFraction, so a screen-relative bar sticks
-            // out past the text it belongs to.
+            // A fraction of the text column, not of the screen: a
+            // `containerRelativeFrame` here would resolve against the screen,
+            // and the column is narrowed by textWidthFraction, so the bar
+            // would stick out past the text it belongs to. It was a fraction
+            // of the *measured* column until that measurement turned out to be
+            // the widest line's ideal width — which is why the bar ran off the
+            // screen alongside the lines.
             MicLevelBarView(level: micLevel)
-                .frame(width: max(measuredWidth, 0) * 0.45)
+                .frame(width: columnWidth * 0.45)
 
             if cameraFacing == .back {
                 BackCameraNotice()
@@ -233,11 +296,8 @@ struct TeleprompterOverlayView: View {
     }
 
     private func reportLayout() {
-        guard measuredWidth > textInset else { return }
-        onLayoutChange(
-            measuredWidth - textInset,
-            SystemFontLineMeasurer(font: rowFont)
-        )
+        guard columnWidth > 0 else { return }
+        onLayoutChange(columnWidth, SystemFontLineMeasurer(font: rowFont))
     }
 }
 
