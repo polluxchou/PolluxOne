@@ -30,6 +30,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/TakeArchive.swift" \
   "$IOS/Engines/ScriptAlignmentEngine.swift" \
   "$IOS/Engines/ReadingPacer.swift" \
+  "$IOS/Engines/TeleprompterEngine.swift" \
   "$IOS/Engines/SafeWordDetector.swift" \
   "$IOS/Engines/VoiceCommandEngine.swift" \
   "$IOS/Engines/TakeArchiver.swift" \

@@ -108,6 +108,7 @@ final class SessionManager {
 
         recordingEngine.startRecording()
         audioLevelMonitor.startDisplayUpdates()
+        teleprompterEngine.startPacing()
 
         do {
             try speechService.start(
@@ -135,6 +136,7 @@ final class SessionManager {
         recordingEngine.stopRecording()
         speechService.stop()
         audioLevelMonitor.stopDisplayUpdates()
+        teleprompterEngine.stopPacing()
         currentRecordingSession?.endedAt = Date()
     }
 
@@ -182,7 +184,7 @@ final class SessionManager {
         revision.editedAt = Date()
         scriptRevision = revision
 
-        teleprompterEngine.load(script: script)
+        teleprompterEngine.load(script: script, startingAt: readingSession?.currentPosition?.address)
         // Realign from the same address so the reader doesn't visually jump.
         alignmentEngine.reset(script: script, startingAt: readingSession?.currentPosition?.address)
     }
@@ -205,7 +207,7 @@ extension SessionManager: SpeechRecognitionServiceDelegate {
             // from the new position, so reading it first stored the previous
             // sentence's value.
             teleprompterEngine.update(position: position)
-            readingSession?.progress = teleprompterEngine.displayState.progress
+            readingSession?.progress = teleprompterEngine.readingProgress
         }
     }
 

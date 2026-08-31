@@ -86,6 +86,16 @@ final class ReadingPacer {
     /// score is low, so even a weak result carries a real position. Only the
     /// *rate* sample is gated, because a confident-looking gap between two
     /// weak results is a fiction.
+    ///
+    /// `time` carries a contract the caller has to keep: it must increase
+    /// monotonically along one continuous timeline, and `reset` — the only
+    /// thing that clears `lastTruthTime` — must be called at the start of each
+    /// take. A rate sample is only taken when `time > lastTruthTime`, so a
+    /// caller that restarts its timeline at zero without resetting silently
+    /// stops measuring the reader and coasts on the seeded rate for the rest
+    /// of the take. `TeleprompterEngine` satisfies both: it passes
+    /// `updatedAt.timeIntervalSinceReferenceDate`, an absolute timeline that
+    /// does not restart, and its `load` builds a fresh pacer and resets it.
     func correct(
         to truth: Double,
         confidence: Double,
@@ -96,6 +106,12 @@ final class ReadingPacer {
            let previousTime = lastTruthTime,
            time > previousTime {
             let sample = (truth - lastTruth) / (time - previousTime)
+            // Negative samples are the normal aftermath of a backward seek:
+            // the result right after a reader goes back to re-read a line
+            // measures as a negative speed. Blending that in would drag the
+            // estimated rate towards its floor and leave the prompter crawling
+            // for the rest of the take, so a reader who re-reads one line is
+            // exactly who this guard protects.
             if sample > 0 {
                 let blended = rate * (1 - rateSmoothing) + sample * rateSmoothing
                 rate = min(max(blended, language.rateBounds.lowerBound), language.rateBounds.upperBound)

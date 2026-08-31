@@ -134,6 +134,124 @@ func runPacingSuite() -> (pass: Int, fail: Int) {
     report.check(noisy.cursor == 100,
                  "but the position still moves: the alignment engine only ever returns its last known-good sentence")
 
+    report.section("the fixed window — the band never moves")
+
+    let windowScript = makeLayoutScript([
+        "大多数提词器都在解决错误的问题。它们让字变得容易读，却把你的眼神从镜头上拉走了。你的目光一离开镜头，观众立刻就能感觉到。",
+        "Pollux One 从另一个问题出发。你的眼睛、文字和镜头之间，最短的距离是多少？"
+    ])
+    let engine = TeleprompterEngine()
+    engine.load(script: windowScript)
+    engine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+
+    report.check(engine.displayState.visibleRows == 5,
+                 "a Chinese script shows 5 rows")
+    report.check(engine.displayState.readRowsAbove == 1,
+                 "with 1 dim history row above the band")
+    report.check(engine.displayState.lines.count > 5,
+                 "the fixture is longer than one window",
+                 detail: "\(engine.displayState.lines.count) lines")
+    report.check(engine.displayState.currentLineIndex == 0,
+                 "a freshly loaded script starts on line 0")
+    report.check(engine.inLineProgress == 0,
+                 "and at the very start of that line")
+
+    report.section("displayState changes only when the window does")
+
+    let stateBeforeTick = engine.displayState
+    for _ in 0..<3 { engine.tick(deltaTime: 1.0 / 30.0) }
+
+    report.check(engine.displayState == stateBeforeTick,
+                 "three ticks inside one line leave the line window untouched — this is what keeps 30Hz off the text",
+                 detail: "line \(engine.displayState.currentLineIndex)")
+    report.check(engine.inLineProgress > 0,
+                 "while the fine cursor did move",
+                 detail: "\(engine.inLineProgress)")
+
+    report.section("a large jump seeks, and the window follows")
+
+    if let lastSentence = windowScript.allSentences.last {
+        engine.update(position: makePosition(lastSentence, tokenIndex: 0, in: windowScript))
+    }
+
+    report.check(engine.displayState.currentLineIndex > 1,
+                 "jumping to the last sentence moves the window well past the top",
+                 detail: "line \(engine.displayState.currentLineIndex)")
+    report.check(engine.displayState.currentLineIndex < engine.displayState.lines.count,
+                 "and never past the end of the script")
+
+    report.section("re-layout keeps the reader where they were")
+
+    let offsetBefore = engine.cursorOffset
+    let lineBefore = engine.displayState.currentLineIndex
+    engine.setLayout(width: 60, measurer: FakeTextMeasurer(em: 10))
+
+    report.check(engine.cursorOffset == offsetBefore,
+                 "the character offset is untouched by re-layout — this is the whole reason the cursor is measured in characters",
+                 detail: "\(offsetBefore) -> \(engine.cursorOffset)")
+    report.check(engine.displayState.currentLineIndex > lineBefore,
+                 "a narrower column puts the same character on a later line",
+                 detail: "\(lineBefore) -> \(engine.displayState.currentLineIndex)")
+
+    let landedLine = engine.displayState.lines[engine.displayState.currentLineIndex]
+    report.check(landedLine.characterRange.contains(Int(engine.cursorOffset)),
+                 "and the line the window points at really does contain that character")
+
+    report.section("dead reckoning is capped from the current line's own length")
+
+    let cappedEngine = TeleprompterEngine()
+    cappedEngine.load(script: windowScript)
+    cappedEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+    for _ in 0..<900 { cappedEngine.tick(deltaTime: 1.0 / 30.0) }
+
+    report.check(cappedEngine.cursorOffset <= 1.2 * 10 + 0.001,
+                 "30 seconds of silence from line 0 advances at most 1.2 of that line's 10 characters",
+                 detail: "\(cappedEngine.cursorOffset)")
+    report.check(cappedEngine.displayState.currentLineIndex <= 1,
+                 "so the window sits on line 0 or 1, not at the end of the script",
+                 detail: "line \(cappedEngine.displayState.currentLineIndex)")
+
+    report.section("progress is reported outside the line window")
+
+    report.check(engine.readingProgress.totalSentences == windowScript.allSentences.count,
+                 "progress counts every sentence in the script",
+                 detail: "\(engine.readingProgress.totalSentences)")
+    report.check(engine.readingProgress.fractionComplete > 0
+                    && engine.readingProgress.fractionComplete <= 1,
+                 "and reads as a fraction after the seek",
+                 detail: "\(engine.readingProgress.fractionComplete)")
+
+    report.section("a Safe Word reload does not rewind the reader")
+
+    let reloadEngine = TeleprompterEngine()
+    reloadEngine.load(script: windowScript)
+    reloadEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+    let midSentence = windowScript.allSentences[2]
+    let midPosition = makePosition(midSentence, tokenIndex: 0, in: windowScript)
+    reloadEngine.update(position: midPosition)
+    let lineAfterSeek = reloadEngine.displayState.currentLineIndex
+
+    reloadEngine.load(script: windowScript, startingAt: midPosition.address)
+
+    report.check(reloadEngine.displayState.currentLineIndex == lineAfterSeek,
+                 "reloading from the same address leaves the window where it was",
+                 detail: "\(lineAfterSeek) -> \(reloadEngine.displayState.currentLineIndex)")
+    report.check(reloadEngine.displayState.currentLineIndex > 0,
+                 "which is emphatically not the top of the script")
+
+    report.section("Latin gets six rows and two history rows")
+
+    let latinEngine = TeleprompterEngine()
+    latinEngine.load(script: makeLayoutScript([
+        "Most teleprompters solve the wrong problem. They pull your eyes away from the lens."
+    ]))
+    latinEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+
+    report.check(latinEngine.displayState.visibleRows == 6,
+                 "6 rows in Latin")
+    report.check(latinEngine.displayState.readRowsAbove == 2,
+                 "with 2 dim history rows above the band")
+
     report.section("Latin gets its own numbers")
 
     let latin = ReadingPacer(language: .latin)
