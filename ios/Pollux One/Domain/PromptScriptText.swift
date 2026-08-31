@@ -31,6 +31,13 @@ struct PromptScriptText: Equatable {
     /// at the end of its sentence — the Chinese prompter would sit still for a
     /// whole sentence and then jump. Nothing crashes; it just looks broken.
     let sentenceTokenCounts: [UUID: Int]
+    /// Paragraph id -> the offset in `text` where that paragraph begins.
+    ///
+    /// Exists for `resumeOffset(for:)` and nothing else: a Safe Word edit
+    /// destroys the sentence ids inside the paragraph it rewrites, and the
+    /// paragraph id is then the only part of the reader's address still
+    /// present in the rebuilt script.
+    let paragraphOffsets: [UUID: Int]
     /// Offsets no line may run across — paragraph and section boundaries.
     let hardBreaks: [Int]
     let language: ScriptLanguage
@@ -52,6 +59,36 @@ struct PromptScriptText: Equatable {
         return Double(range.lowerBound) + ratio * Double(range.count)
     }
 
+    /// Where a reload should put the reader, given the address they were last
+    /// known to be at.
+    ///
+    /// Three answers in decreasing precision: the sentence's own offset, the
+    /// offset the sentence's paragraph begins at, then the top of the script.
+    ///
+    /// The middle one is the whole reason this method exists. `load` used to
+    /// resolve only the sentence — `sentenceRanges[address.sentenceId]` with a
+    /// bare `?? 0` behind it — which reads as a safe default and is in fact the
+    /// opposite. The one caller that passes an address is a Safe Word edit, and
+    /// it rebuilds the edited paragraph with `SentenceSplitter.sentences(from:)`,
+    /// whose `Sentence.init(order:text:)` mints a fresh `UUID` for every
+    /// sentence. `SessionManager.currentParagraphId()` then guarantees the
+    /// rewritten paragraph is the one the reader is standing in — so the
+    /// sentence lookup missed *every single time*, and correcting one sentence
+    /// mid-take threw the reader back to the top of their script (measured:
+    /// cursor 80.0 -> 0.0). The parameter existed precisely to stop that and
+    /// failed in the only case it was written for.
+    ///
+    /// Landing at the top of the edited paragraph is the honest answer: the
+    /// text the old character offset pointed into no longer exists, so there is
+    /// nothing to preserve it against. The paragraph the reader is in is the
+    /// finest granularity that survives the edit, and it is a few seconds of
+    /// re-reading rather than the whole script.
+    func resumeOffset(for address: ScriptAddress) -> Int {
+        sentenceRanges[address.sentenceId]?.lowerBound
+            ?? paragraphOffsets[address.paragraphId]
+            ?? 0
+    }
+
     static func build(_ script: Script) -> PromptScriptText {
         let language = ScriptLanguage.detect(script.fullText)
         let joiner = language.sentenceJoiner
@@ -60,11 +97,16 @@ struct PromptScriptText: Equatable {
         var offset = 0
         var ranges: [UUID: Range<Int>] = [:]
         var tokenCounts: [UUID: Int] = [:]
+        var paragraphOffsets: [UUID: Int] = [:]
         var hardBreaks: [Int] = []
 
         for section in script.sections.sorted(by: { $0.order < $1.order }) {
             for paragraph in section.paragraphs.sorted(by: { $0.order < $1.order }) {
                 if offset > 0 { hardBreaks.append(offset) }
+                // Recorded before the sentences are walked, so a paragraph
+                // that ends up with no text still resolves to where it would
+                // have started rather than dropping out of the index.
+                paragraphOffsets[paragraph.id] = offset
 
                 let sentences = paragraph.sentences.sorted { $0.order < $1.order }
                 for (index, sentence) in sentences.enumerated() {
@@ -85,6 +127,7 @@ struct PromptScriptText: Equatable {
             text: text,
             sentenceRanges: ranges,
             sentenceTokenCounts: tokenCounts,
+            paragraphOffsets: paragraphOffsets,
             hardBreaks: hardBreaks,
             language: language
         )

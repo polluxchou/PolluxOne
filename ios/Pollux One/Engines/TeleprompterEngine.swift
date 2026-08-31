@@ -93,6 +93,12 @@ final class TeleprompterEngine {
     /// `address` reloads without rewinding. A Safe Word edit rebuilds the
     /// script mid-take and calls this; starting from 0 there would throw the
     /// reader back to the top of their script for changing one sentence.
+    ///
+    /// Resolving that address is `PromptScriptText.resumeOffset(for:)`, and it
+    /// is deliberately not inlined here any more: it used to be a one-line
+    /// `built.sentenceRanges[address.sentenceId]?.lowerBound ?? 0`, which is
+    /// exactly the sentence-only lookup a Safe Word edit is guaranteed to
+    /// defeat. See that method for why.
     func load(script: Script, startingAt address: ScriptAddress? = nil) {
         let built = PromptScriptText.build(script)
         source = built
@@ -101,7 +107,7 @@ final class TeleprompterEngine {
 
         sentenceRanges = script.allSentences.compactMap { built.sentenceRanges[$0.id] }
 
-        let start = address.flatMap { built.sentenceRanges[$0.sentenceId]?.lowerBound } ?? 0
+        let start = address.map { built.resumeOffset(for: $0) } ?? 0
         pacer.reset(to: Double(start), language: built.language)
 
         rebuildLines()

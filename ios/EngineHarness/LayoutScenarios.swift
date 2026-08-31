@@ -104,6 +104,70 @@ func runLayoutSuite() -> (pass: Int, fail: Int) {
     report.check(PromptScriptText.build(makeLayoutScript([])).text.isEmpty,
                  "an empty script builds without crashing")
 
+    report.section("resuming from an address — the paragraph is the fallback a Safe Word edit needs")
+
+    let chineseParagraphs = chinese.sections[0].paragraphs
+    report.check(chineseText.paragraphOffsets[chineseParagraphs[0].id] == 0,
+                 "the first paragraph begins at 0")
+    report.check(chineseText.paragraphOffsets[chineseParagraphs[1].id] == chineseText.hardBreaks[0],
+                 "and the second begins exactly where the hard break is — one boundary, indexed two ways",
+                 detail: "\(String(describing: chineseText.paragraphOffsets[chineseParagraphs[1].id])) vs \(chineseText.hardBreaks)")
+
+    let secondParagraphSentence = chineseParagraphs[1].sentences[0]
+    let liveAddress = ScriptAddress(
+        scriptId: chinese.id,
+        scriptVersion: chinese.version,
+        sectionId: chinese.sections[0].id,
+        paragraphId: chineseParagraphs[1].id,
+        sentenceId: secondParagraphSentence.id
+    )
+    report.check(chineseText.resumeOffset(for: liveAddress)
+                    == chineseText.sentenceRanges[secondParagraphSentence.id]?.lowerBound,
+                 "a live sentence id resolves to that sentence's own offset")
+
+    // What a Safe Word edit leaves behind: the paragraph, and nothing finer.
+    let editedAddress = ScriptAddress(
+        scriptId: chinese.id,
+        scriptVersion: chinese.version,
+        sectionId: chinese.sections[0].id,
+        paragraphId: chineseParagraphs[1].id,
+        sentenceId: UUID()
+    )
+    report.check(chineseText.resumeOffset(for: editedAddress) == chineseText.hardBreaks[0],
+                 "a dead sentence id inside a live paragraph resolves to the paragraph's start",
+                 detail: "\(chineseText.resumeOffset(for: editedAddress))")
+
+    let goneAddress = ScriptAddress(
+        scriptId: chinese.id,
+        scriptVersion: chinese.version,
+        sectionId: chinese.sections[0].id,
+        paragraphId: UUID(),
+        sentenceId: UUID()
+    )
+    report.check(chineseText.resumeOffset(for: goneAddress) == 0,
+                 "only an address with nothing left in it falls all the way back to 0")
+
+    // A Safe Word edit can replace a paragraph with text the splitter finds no
+    // sentences in. Indexing the paragraph before its sentences are walked is
+    // what keeps it resolvable; dropping out of the index would send the reader
+    // to 0, which is the very thing this fallback exists to prevent.
+    let blankMiddle = makeLayoutScript(["第一段。", "   ", "第三段。"])
+    let blankMiddleText = PromptScriptText.build(blankMiddle)
+    let blankParagraphId = blankMiddle.sections[0].paragraphs[1].id
+    let blankAddress = ScriptAddress(
+        scriptId: blankMiddle.id,
+        scriptVersion: blankMiddle.version,
+        sectionId: blankMiddle.sections[0].id,
+        paragraphId: blankParagraphId,
+        sentenceId: UUID()
+    )
+    report.check(blankMiddleText.paragraphOffsets.count == 3,
+                 "a paragraph that split to no sentences is still in the index",
+                 detail: "\(blankMiddleText.paragraphOffsets.count) paragraphs indexed")
+    report.check(blankMiddleText.resumeOffset(for: blankAddress) == 4,
+                 "and resolves to where it would have begun, right after 第一段。",
+                 detail: "\(blankMiddleText.resumeOffset(for: blankAddress))")
+
     report.section("a reading position becomes a character offset — with the right denominator")
 
     let denominatorScript = makeLayoutScript(["大多数提词器都在解决错误的问题。"])
@@ -296,6 +360,33 @@ func makePosition(_ sentence: Sentence, tokenIndex: Int, in script: Script) -> R
         confidence: 0.9,
         updatedAt: Date()
     )
+}
+
+/// Rewrites one paragraph exactly the way `SessionManager.applyParagraphReplacement`
+/// does, because *how* it rewrites is the whole point of the scenarios that use
+/// it: the paragraph keeps its id, and `SentenceSplitter.sentences(from:)` goes
+/// through `Sentence.init(order:text:)`, which defaults `id` to a fresh `UUID`.
+/// So every sentence id inside the edited paragraph is new.
+///
+/// Reloading the *same* Script value instead — which is what the Safe Word
+/// scenario used to do — leaves those ids alive and therefore cannot fail,
+/// whatever the resume lookup does.
+@MainActor
+func replacingParagraph(_ paragraphId: UUID, in script: Script, with newText: String) -> Script {
+    var edited = script
+    outer: for sectionIndex in edited.sections.indices {
+        for paragraphIndex in edited.sections[sectionIndex].paragraphs.indices
+        where edited.sections[sectionIndex].paragraphs[paragraphIndex].id == paragraphId {
+            let order = edited.sections[sectionIndex].paragraphs[paragraphIndex].order
+            edited.sections[sectionIndex].paragraphs[paragraphIndex] = Paragraph(
+                id: paragraphId,
+                order: order,
+                sentences: SentenceSplitter.sentences(from: newText)
+            )
+            break outer
+        }
+    }
+    return edited
 }
 
 /// Builds a Script the way the mock backend does — one section, one paragraph

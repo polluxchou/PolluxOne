@@ -221,23 +221,81 @@ func runPacingSuite() -> (pass: Int, fail: Int) {
                  "and reads as a fraction after the seek",
                  detail: "\(engine.readingProgress.fractionComplete)")
 
-    report.section("a Safe Word reload does not rewind the reader")
+    report.section("a Safe Word edit does not rewind the reader")
 
-    let reloadEngine = TeleprompterEngine()
-    reloadEngine.load(script: windowScript)
-    reloadEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
-    let midSentence = windowScript.allSentences[2]
-    let midPosition = makePosition(midSentence, tokenIndex: 0, in: windowScript)
-    reloadEngine.update(position: midPosition)
-    let lineAfterSeek = reloadEngine.displayState.currentLineIndex
+    // This section used to reload `windowScript` itself, and that is why the
+    // defect shipped past a passing suite: the same Script value carries the
+    // same sentence ids, so the resume lookup could not miss and the scenario
+    // could not fail. The real path rebuilds the paragraph, which mints new
+    // sentence ids for all of it — see `replacingParagraph`.
+    let editedParagraphId = windowScript.sections[0].paragraphs[1].id
+    // The second sentence of the second paragraph, so that the sentence's own
+    // offset, the paragraph's start, and 0 are three distinguishable answers.
+    let reader = windowScript.allSentences[4]
+    let readerAddress = makePosition(reader, tokenIndex: 0, in: windowScript).address
 
-    reloadEngine.load(script: windowScript, startingAt: midPosition.address)
+    let editedEngine = TeleprompterEngine()
+    editedEngine.load(script: windowScript)
+    editedEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+    editedEngine.update(position: makePosition(reader, tokenIndex: 0, in: windowScript))
+    let offsetBeforeEdit = editedEngine.cursorOffset
+    let lineBeforeEdit = editedEngine.displayState.currentLineIndex
 
-    report.check(reloadEngine.displayState.currentLineIndex == lineAfterSeek,
-                 "reloading from the same address leaves the window where it was",
-                 detail: "\(lineAfterSeek) -> \(reloadEngine.displayState.currentLineIndex)")
-    report.check(reloadEngine.displayState.currentLineIndex > 0,
-                 "which is emphatically not the top of the script")
+    let edited = replacingParagraph(
+        editedParagraphId,
+        in: windowScript,
+        with: "Pollux One 从另一个问题出发。你的眼睛和镜头之间，最短的距离是多少？"
+    )
+    let editedText = PromptScriptText.build(edited)
+    let survivingIds = Set(windowScript.allSentences.map(\.id))
+
+    report.check(edited.sections[0].paragraphs[1].sentences.allSatisfy { !survivingIds.contains($0.id) },
+                 "the rebuilt paragraph's sentence ids are all new — this is what makes a sentence-only lookup miss")
+    report.check(edited.sections[0].paragraphs[1].id == editedParagraphId,
+                 "while the paragraph's own id survives the edit, which is what the fallback keys on")
+
+    editedEngine.load(script: edited, startingAt: readerAddress)
+
+    report.check(offsetBeforeEdit > 0,
+                 "the reader was well into the script before the edit",
+                 detail: "\(offsetBeforeEdit)")
+    report.check(editedEngine.cursorOffset == Double(editedText.hardBreaks[0]),
+                 "and lands at the top of the edited paragraph, not the top of the script",
+                 detail: "\(offsetBeforeEdit) -> \(editedEngine.cursorOffset), paragraph 2 starts at \(editedText.hardBreaks[0])")
+    report.check(editedEngine.displayState.currentLineIndex > 0,
+                 "so the window is not back on line 0 either",
+                 detail: "line \(lineBeforeEdit) -> \(editedEngine.displayState.currentLineIndex)")
+
+    // The paragraph is a fallback, not a replacement: a sentence id that is
+    // still there is the finer answer and has to win.
+    let intactEngine = TeleprompterEngine()
+    intactEngine.load(script: windowScript)
+    intactEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+    intactEngine.load(script: windowScript, startingAt: readerAddress)
+    let windowText = PromptScriptText.build(windowScript)
+
+    report.check(intactEngine.cursorOffset == Double(windowText.sentenceRanges[reader.id]?.lowerBound ?? -1),
+                 "an address whose sentence still exists resolves to that sentence, not to its paragraph",
+                 detail: "\(intactEngine.cursorOffset) vs paragraph 2 at \(windowText.hardBreaks[0])")
+
+    // Both halves of the address gone — a script swapped out from under the
+    // reader rather than edited. There is nothing left to aim at.
+    let strandedAddress = ScriptAddress(
+        scriptId: windowScript.id,
+        scriptVersion: windowScript.version,
+        sectionId: windowScript.sections[0].id,
+        paragraphId: UUID(),
+        sentenceId: UUID()
+    )
+    let strandedEngine = TeleprompterEngine()
+    strandedEngine.load(script: windowScript)
+    strandedEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+    strandedEngine.update(position: makePosition(reader, tokenIndex: 0, in: windowScript))
+    strandedEngine.load(script: windowScript, startingAt: strandedAddress)
+
+    report.check(strandedEngine.cursorOffset == 0,
+                 "an address matching neither a sentence nor a paragraph is the one case that starts over",
+                 detail: "\(strandedEngine.cursorOffset)")
 
     report.section("Latin gets six rows and two history rows")
 
