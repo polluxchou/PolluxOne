@@ -1248,7 +1248,8 @@ struct TopHUDView: View {
     }
 ```
 
-> 别顺手"修"这里的 padding：`TopHUDView` 内部的 `.padding(.horizontal, 18).padding(.top, 16)` 和 `RecordingView` 外面套的那层是既有的重复，动它会让整个顶部 HUD 位移。
+> **执行阶段作废：Step 1 的顶部方案实测不成立，见下方「Task 11 实测修正」。**
+> `TopHUDView` 保持原样不动，状态行改放底部簇。
 
 - [ ] **Step 2: RecordingViewModel 暴露文案**
 
@@ -1354,6 +1355,20 @@ Expected: 退出码 0，`0 failed`。
 git add "ios/Pollux One/Features/Recording/TopHUDView.swift" "ios/Pollux One/Features/Recording/RecordingViewModel.swift" "ios/Pollux One/Features/Recording/RecordingView.swift" "ios/Pollux One/Features/ScriptList/ScriptListView.swift" "ios/Pollux One/App/RootView.swift"
 git commit -m "Show where the last take went on the recording HUD"
 ```
+
+### Task 11 实测修正
+
+顶部方案在模拟器上连撞两次，已作废：
+
+1. 第二行盖住 `top: 60` 的提词器。两者是 ZStack 里各自绝对定位的兄弟节点，提词器
+   不会被推下去——计划里「`if let` 避免顶下提词器」的推理假设了流式布局，是错的。
+2. 去掉重复 padding 把 REC 行还原到规范的 16pt 后，第二行落在 ~43pt 正中灵动岛，
+   截图里中段整体不可见。REC 行本就是设计成分列灵动岛两侧的。
+
+**已实现的替代方案：** 状态行移到底部簇，新增
+`RecordingView.Offset.archiveStatusBottom = 245`（参数行 162 之上、底部渐变 270 之内），
+`TopHUDView` 完整还原为原来的单行 `HStack`。已在模拟器验证：拒绝态文案完整可读、
+不与任何元素相撞；授权态该行完全不参与布局，其余控件位置零位移。
 
 ---
 

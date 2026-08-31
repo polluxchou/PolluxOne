@@ -213,6 +213,8 @@ INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Pollux One saves the takes yo
 
 ## 6 · HUD
 
+> **实现阶段修正（2026-08-31）：本节下面描述的顶部方案被实测推翻，实际实现见本节末尾。**
+
 `TopHUDView` 从单行 `HStack` 改成 `VStack`：
 
 - 第一行：维持现状 `● REC 00:12` … `LEFT 1h42m`（灵动岛两侧，位置不动）
@@ -230,6 +232,27 @@ teleprompter 往下顶 —— 两者之间只有 44pt 空隙。
 `RecordingView` 把 `viewModel.sessionManager.takeArchiveState` /
 `.photoLibraryPermission` 传进去；`SessionManager` 上加两个 computed passthrough
 读 archiver，`@Observable` 会自动传播变更。
+
+### 6.1 · 实测修正：这行不能放在顶部
+
+在模拟器上跑起来后，顶部方案两次都不成立：
+
+1. **压提词器。** `TopHUDView` 内部的 `.padding(.top, 16)` 和 `RecordingView` 外面
+   的 `.topAnchored(16)` 是重复的，REC 行实际落在 32pt 而非规范的 16pt。第二行从
+   53pt 延伸到 66pt，盖住 `top: 60` 的提词器。它俩是 ZStack 里各自绝对定位的兄弟
+   节点，提词器**不会被推下去**，只会被盖住——原设计里"`if let` 避免顶下提词器"
+   的推理建立在流式布局的错误假设上。
+2. **被灵动岛吞掉中段。** 去掉重复 padding 把 REC 行还原到 16pt 后，第二行落在
+   ~43pt，正好穿过灵动岛。截图显示文案变成
+   `Photos acce……n't be saved.`，中间整段不可见。REC 行本来就是**设计成分列灵动
+   岛两侧**的，任何横跨中线的元素都会缺一块。
+
+把提词器下移不在选项内——它离镜头的距离就是这个产品本身。
+
+**实际实现：** 这行移到底部簇，`RecordingView.Offset.archiveStatusBottom = 245`，
+在参数行（bottom:162）之上、既有 270pt 底部渐变之内，居中、11pt、`if let` 控制
+是否参与布局。`TopHUDView` 完全保持原样（含那处重复 padding，它现在与本功能无关，
+不该顺带改），只补了一条注释说明为什么那一行不能再加东西。
 
 ## 7 · 验证
 
