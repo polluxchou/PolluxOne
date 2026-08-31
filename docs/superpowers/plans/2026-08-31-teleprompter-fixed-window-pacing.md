@@ -6,7 +6,7 @@
 
 **Architecture:** 新增一层排版管线 `PromptScriptText`（唯一的文本拼接口径 + 句子字偏移表）→ `PromptLineLayout`（贪心断行，宽度测量经 `TextWidthMeasuring` 协议注入）→ `[PromptLine]`。新增 `ReadingPacer` 把离散、有延迟的语音对齐结果变成连续的字符光标（dead reckoning + 校正 + 前推上限）。`TeleprompterEngine` 改为持有行数组与配速器，按 30Hz tick 输出「当前行号 + 行内进度」；视图渲染整脚本的行并整体位移，衬底作为**固定层**画在文字下面。
 
-**Tech Stack:** Swift 5 语言模式 + `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`、SwiftUI、Observation、CoreText/UIKit（仅 `CoreTextLineMeasurer` 一个文件）。工程用 `PBXFileSystemSynchronizedRootGroup`（objectVersion 77），新增 `.swift` 文件自动进 target，**不需要**改 pbxproj。
+**Tech Stack:** Swift 5 语言模式 + `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`、SwiftUI、Observation、UIKit（仅 `SystemFontLineMeasurer` 一个文件）。工程用 `PBXFileSystemSynchronizedRootGroup`（objectVersion 77），新增 `.swift` 文件自动进 target，**不需要**改 pbxproj。
 
 **Spec:** `docs/superpowers/specs/2026-08-31-teleprompter-fixed-window-pacing-design.md`
 
@@ -46,7 +46,7 @@ iOS 侧编译验证。只有 Task 6/7/8 需要它——Task 1–5 全部能在 h
 | `ios/Pollux One/Domain/PromptScriptText.swift` | 唯一的文本拼接口径 + 句子字符区间表 + 硬断点。纯数据，进 harness。 |
 | `ios/Pollux One/Domain/PromptLineLayout.swift` | 贪心断行（含中日文禁则）+ `TextWidthMeasuring` 协议 + `PromptLine`。纯逻辑，进 harness。 |
 | `ios/Pollux One/Engines/ReadingPacer.swift` | dead reckoning + 语音校正 + 前推上限。纯逻辑，进 harness。 |
-| `ios/Pollux One/Features/Recording/CoreTextLineMeasurer.swift` | 唯一碰 UIKit/CoreText 的新文件：逐字符 advance。**不进** harness。 |
+| `ios/Pollux One/Features/Recording/SystemFontLineMeasurer.swift` | 唯一碰 UIKit 的新文件：逐字符量宽，带按字符缓存。**不进** harness。 |
 | `ios/EngineHarness/FakeTextMeasurer.swift` | 确定性假测量：CJK = 1em，其余 = 0.5em。让断行可精确断言。 |
 | `ios/EngineHarness/LayoutScenarios.swift` | 语种判定、拼接口径、断行的离线场景。 |
 | `ios/EngineHarness/PacingScenarios.swift` | 配速器与行窗逻辑的离线场景。 |

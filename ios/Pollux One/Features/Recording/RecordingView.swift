@@ -22,7 +22,6 @@ struct RecordingView: View {
         static let statusRowTop: CGFloat = 16
         static let teleprompterTop: CGFloat = 60
         static let teleprompterLeading: CGFloat = 20
-        static let teleprompterTrailing: CGFloat = 12
         static let exposureSliderBottom: CGFloat = 210
         static let paramsRowBottom: CGFloat = 162
         static let lensSelectorBottom: CGFloat = 112
@@ -31,7 +30,10 @@ struct RecordingView: View {
         /// HUD: that row is placed to flank the Dynamic Island, which swallows
         /// anything spanning the middle of it.
         static let archiveStatusBottom: CGFloat = 245
-        static let topScrimHeight: CGFloat = 300
+        /// 330, not 300: at the 28pt type-size ceiling a six-row Latin window
+        /// reaches 312pt from the top, and the rows past the gradient's end
+        /// lose their backing and sit straight on the picture.
+        static let topScrimHeight: CGFloat = 330
         static let bottomScrimHeight: CGFloat = 270
     }
 
@@ -140,15 +142,31 @@ struct RecordingView: View {
 
             TeleprompterOverlayView(
                 state: viewModel.sessionManager.teleprompterEngine.displayState,
+                inLineProgress: viewModel.sessionManager.teleprompterEngine.inLineProgress,
+                progressFraction: viewModel.sessionManager.teleprompterEngine.readingProgress.fractionComplete,
                 textSize: viewModel.teleprompterSettings.textSize,
                 micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
                 cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
-                onTap: { viewModel.openTeleprompterAdjust() }
+                onTap: { viewModel.openTeleprompterAdjust() },
+                onLayoutChange: { width, measurer in
+                    viewModel.sessionManager.teleprompterEngine.setLayout(width: width, measurer: measurer)
+                }
             )
+            // The Width slider had never been wired to anything: this is the
+            // first thing that reads textWidthFraction. It has to be applied
+            // here rather than inside the overlay, because the fraction is of
+            // the screen, and it is what decides where lines break.
+            //
+            // There is deliberately no trailing padding to balance the leading
+            // one any more. The fraction governs the column's width; a second
+            // inset pulling on the same edge would leave two things deciding
+            // one number, and the slider's effect would stop being predictable.
+            .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+                width * viewModel.teleprompterSettings.textWidthFraction
+            }
             .opacity(viewModel.teleprompterSettings.opacity)
             .offset(y: viewModel.teleprompterSettings.verticalOffset)
             .padding(.leading, Offset.teleprompterLeading)
-            .padding(.trailing, Offset.teleprompterTrailing)
             .topAnchored(Offset.teleprompterTop)
         }
     }
