@@ -47,6 +47,101 @@ func runLayoutSuite() -> (pass: Int, fail: Int) {
     report.check(ScriptLanguage.latin.sentenceJoiner == " ",
                  "Latin sentences join with a space")
 
+    report.section("canonical text is the single concatenation everything measures against")
+
+    let chinese = makeLayoutScript([
+        "大多数提词器都在解决错误的问题。它们让字变得容易读。",
+        "Pollux One 从另一个问题出发。"
+    ])
+    let chineseText = PromptScriptText.build(chinese)
+
+    report.check(chineseText.language == .cjk, "a Chinese script is built as CJK")
+    report.check(!chineseText.text.contains("。 "),
+                 "no space is inserted after a Chinese full stop",
+                 detail: chineseText.text)
+    report.check(chineseText.text.hasPrefix("大多数提词器都在解决错误的问题。它们"),
+                 "Chinese sentences butt straight up against each other")
+    report.check(chineseText.hardBreaks == [26],
+                 "the paragraph boundary is recorded as an offset, not a newline",
+                 detail: "\(chineseText.hardBreaks)")
+    report.check(!chineseText.text.contains("\n"),
+                 "canonical text holds no characters that are never read aloud")
+
+    let chineseSentences = chinese.allSentences
+    report.check(chineseText.sentenceRanges.count == chineseSentences.count,
+                 "every sentence has a range")
+
+    let firstRange = chineseText.sentenceRanges[chineseSentences[0].id]
+    report.check(firstRange == 0..<16,
+                 "the first sentence starts at 0",
+                 detail: "\(String(describing: firstRange))")
+
+    let rangesAgree = chineseSentences.allSatisfy { sentence in
+        guard let range = chineseText.sentenceRanges[sentence.id] else { return false }
+        return String(Array(chineseText.text)[range]) == sentence.text
+    }
+    report.check(rangesAgree,
+                 "slicing canonical text by a sentence's range reproduces that sentence")
+
+    let english = makeLayoutScript([
+        "Most teleprompters solve the wrong problem. They pull your eyes away.",
+        "Pollux One starts elsewhere."
+    ])
+    let englishText = PromptScriptText.build(english)
+
+    report.check(englishText.language == .latin, "an English script is built as Latin")
+    report.check(englishText.text.contains("wrong problem. They"),
+                 "Latin sentences are joined by exactly one space",
+                 detail: englishText.text)
+
+    let englishSentences = english.allSentences
+    let englishAgree = englishSentences.allSatisfy { sentence in
+        guard let range = englishText.sentenceRanges[sentence.id] else { return false }
+        return String(Array(englishText.text)[range]) == sentence.text
+    }
+    report.check(englishAgree, "Latin ranges also slice back to their sentences")
+
+    report.check(PromptScriptText.build(makeLayoutScript([])).text.isEmpty,
+                 "an empty script builds without crashing")
+
+    report.section("a reading position becomes a character offset — with the right denominator")
+
+    let denominatorScript = makeLayoutScript(["大多数提词器都在解决错误的问题。"])
+    let denominatorText = PromptScriptText.build(denominatorScript)
+
+    if let only = denominatorScript.allSentences.first,
+       let onlyRange = denominatorText.sentenceRanges[only.id] {
+
+        report.check(only.tokens.count == 1,
+                     "Sentence.tokens collapses a whole Chinese sentence to 1 — this is the trap",
+                     detail: "\(only.tokens.count)")
+        report.check(denominatorText.sentenceTokenCounts[only.id] == 15,
+                     "so the denominator is TextTokenizer's 15 per-character tokens instead",
+                     detail: "\(String(describing: denominatorText.sentenceTokenCounts[only.id]))")
+
+        let atStart = denominatorText.characterOffset(
+            of: makePosition(only, tokenIndex: 0, in: denominatorScript)
+        )
+        let midway = denominatorText.characterOffset(
+            of: makePosition(only, tokenIndex: 7, in: denominatorScript)
+        )
+        let nearEnd = denominatorText.characterOffset(
+            of: makePosition(only, tokenIndex: 14, in: denominatorScript)
+        )
+
+        report.check(atStart == 0,
+                     "token 0 maps to the sentence's own start offset",
+                     detail: "\(String(describing: atStart))")
+        report.check((midway ?? 0) > 7 && (midway ?? 0) < 8,
+                     "token 7 of 15 lands about halfway through the 16 characters",
+                     detail: "\(String(describing: midway))")
+        report.check((nearEnd ?? 0) < Double(onlyRange.upperBound),
+                     "the last token has not yet reached the end of the sentence — a wrong denominator pins it there",
+                     detail: "\(String(describing: nearEnd)) vs \(onlyRange.upperBound)")
+    } else {
+        report.check(false, "the denominator fixture has a sentence with a range")
+    }
+
     report.section("the tokenizer keeps its old behaviour on the shared predicates")
 
     report.check(TextTokenizer.tokens(in: "你好世界") == ["你", "好", "世", "界"],
@@ -57,4 +152,46 @@ func runLayoutSuite() -> (pass: Int, fail: Int) {
                  "Latin still tokenizes per word, lowercased, depunctuated")
 
     return (report.pass, report.fail)
+}
+
+/// A ReadingPosition aimed at one sentence, as the alignment engine would
+/// emit it. `tokenIndex` indexes `TextTokenizer.tokens(in: sentence.text)` —
+/// the same tokenization `SlidingWindowAlignmentEngine` counts in.
+@MainActor
+func makePosition(_ sentence: Sentence, tokenIndex: Int, in script: Script) -> ReadingPosition {
+    let section = script.sections[0]
+    let paragraph = section.paragraphs.first { paragraph in
+        paragraph.sentences.contains { $0.id == sentence.id }
+    } ?? section.paragraphs[0]
+
+    return ReadingPosition(
+        address: ScriptAddress(
+            scriptId: script.id,
+            scriptVersion: script.version,
+            sectionId: section.id,
+            paragraphId: paragraph.id,
+            sentenceId: sentence.id
+        ),
+        tokenIndexInSentence: tokenIndex,
+        confidence: 0.9,
+        updatedAt: Date()
+    )
+}
+
+/// Builds a Script the way the mock backend does — one section, one paragraph
+/// per string, sentences split by the shared splitter — so the scenarios
+/// exercise the same shape the app actually loads.
+@MainActor
+func makeLayoutScript(_ paragraphs: [String]) -> Script {
+    let built = paragraphs.enumerated().map { index, text in
+        Paragraph(id: UUID(), order: index, sentences: SentenceSplitter.sentences(from: text))
+    }
+    return Script(
+        id: UUID(),
+        title: "Layout fixture",
+        version: 1,
+        sections: [ScriptSection(id: UUID(), title: nil, order: 0, paragraphs: built)],
+        updatedAt: Date(),
+        createdAt: Date()
+    )
 }

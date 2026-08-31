@@ -23,6 +23,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/SpeechTranscript.swift" \
   "$IOS/Domain/SentenceSplitter.swift" \
   "$IOS/Domain/ScriptLanguage.swift" \
+  "$IOS/Domain/PromptScriptText.swift" \
   "$IOS/Domain/TextTokenizer.swift" \
   "$IOS/Domain/VoiceCommand.swift" \
   "$IOS/Domain/TakeArchive.swift" \
