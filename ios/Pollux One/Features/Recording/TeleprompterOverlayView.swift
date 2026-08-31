@@ -90,7 +90,19 @@ struct TeleprompterOverlayView: View {
     private var window: some View {
         HStack(alignment: .top, spacing: railGap) {
             ZStack(alignment: .topLeading) {
-                band
+                // No band with nothing on it. There are two ways to have no
+                // lines — a script with no text, and the one layout pass that
+                // happens before `onGeometryChange` has told the engine how
+                // wide the column is — and both used to paint a bare two-row
+                // bronze rectangle onto the camera picture.
+                //
+                // Only the drawing is skipped, never the frame around it: that
+                // geometry callback is the only thing that gives the engine a
+                // width, so a window that removed itself while empty would
+                // never be measured and the lines would never arrive.
+                if !state.lines.isEmpty {
+                    band
+                }
                 scrollingLines
             }
             .frame(height: windowHeight, alignment: .top)
@@ -110,6 +122,11 @@ struct TeleprompterOverlayView: View {
                 bandHeight: pitch * 2
             )
             .frame(width: railColumnWidth, height: windowHeight)
+            // Faded rather than dropped, for the same reason the band keeps its
+            // frame: taking the rail's column out of the HStack would widen the
+            // text column, which would report a wider layout, produce lines,
+            // bring the rail back and narrow the column again.
+            .opacity(state.lines.isEmpty ? 0 : 1)
         }
     }
 
