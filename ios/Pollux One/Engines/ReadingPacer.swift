@@ -82,10 +82,22 @@ final class ReadingPacer {
     /// Fold in one alignment result.
     ///
     /// Position is trusted at any confidence: `SlidingWindowAlignmentEngine`
-    /// returns its last known-good sentence rather than a guess when its own
-    /// score is low, so even a weak result carries a real position. Only the
-    /// *rate* sample is gated, because a confident-looking gap between two
-    /// weak results is a fiction.
+    /// returns its last known-good position rather than a guess when its own
+    /// score is low, so even a weak result carries a real one. Only the *rate*
+    /// sample is gated, because a confident-looking gap between two weak
+    /// results is a fiction.
+    ///
+    /// That first sentence was only three-quarters true when this was written,
+    /// and the missing quarter was a real bug. The alignment engine held its
+    /// last known-good *sentence* but reported the token index inside it as 0,
+    /// which is the sentence's start. Since `truth` interpolates across the
+    /// sentence from that index, one noisy result pulled the cursor a quarter
+    /// of the way back towards the start of the line the reader was still
+    /// reading, and pulled `lastTruth` back with it so the lookahead ceiling
+    /// dropped and dead reckoning could not recover. Fixed at the source: the
+    /// engine now remembers the offset it last earned. Anything that goes back
+    /// to fabricating an in-sentence index will make this method walk the
+    /// cursor backwards again.
     ///
     /// `time` carries a contract the caller has to keep: it must increase
     /// monotonically along one continuous timeline, and `reset` — the only

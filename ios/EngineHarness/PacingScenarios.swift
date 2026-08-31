@@ -134,6 +134,60 @@ func runPacingSuite() -> (pass: Int, fail: Int) {
     report.check(noisy.cursor == 100,
                  "but the position still moves: the alignment engine only ever returns its last known-good sentence")
 
+    report.section("noise does not walk the cursor backwards")
+
+    // The only scenario here that wires the real alignment engine to the real
+    // prompter, because that is the only place this defect is visible. A
+    // synthetic `ReadingPosition` cannot show it: the fabricated value was the
+    // token index the *alignment engine* put in the position, and every other
+    // scenario builds positions by hand.
+    let noiseScript = makeLayoutScript([
+        "大多数提词器都在解决错误的问题。它们让字变得容易读，却把你的眼神从镜头上拉走了。你的目光一离开镜头，观众立刻就能感觉到。"
+    ])
+    let aligner = SlidingWindowAlignmentEngine()
+    aligner.reset(script: noiseScript, startingAt: nil)
+    let noiseEngine = TeleprompterEngine()
+    noiseEngine.load(script: noiseScript)
+    noiseEngine.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+
+    var heard = ""
+    func speak(_ text: String) -> ReadingPosition? {
+        // Chinese transcripts are cumulative and unspaced, as the recognizer
+        // emits them.
+        heard += text
+        guard let position = aligner.ingest(transcript: SpeechTranscript(text: heard, isFinal: false)) else {
+            return nil
+        }
+        noiseEngine.update(position: position)
+        return position
+    }
+
+    _ = speak("大多数提词器都在解决错误的问题。")
+    _ = speak("它们让字变得容易读，却把你的眼神从镜头上拉")
+    let cursorWhileReading = noiseEngine.cursorOffset
+
+    var noisyCursors: [Double] = []
+    var noisyConfidences: [Double] = []
+    // Long enough to push the script out of the spoken tail, which is what it
+    // takes in Chinese: the tail is sized from the longest candidate sentence,
+    // and CJK tokenizes per character, so a two-character cough on its own
+    // still leaves the sentence covered and scoring high.
+    for noise in ["呃稍等我喝一口水实在抱歉外面有点吵我们重新来一遍", "咳咳", "嗯那个"] {
+        let position = speak(noise)
+        noisyConfidences.append(position?.confidence ?? -1)
+        noisyCursors.append(noiseEngine.cursorOffset)
+    }
+
+    report.check(cursorWhileReading > 0,
+                 "the reader got somewhere before the noise",
+                 detail: "\(cursorWhileReading)")
+    report.check(noisyConfidences.allSatisfy { $0 < 0.34 },
+                 "all three interruptions score below the confidence floor",
+                 detail: "\(noisyConfidences.map { String(format: "%.3f", $0) })")
+    report.check(noisyCursors.allSatisfy { $0 >= cursorWhileReading - 0.001 },
+                 "and none of them drags the cursor back — it used to lose a line per result and pin itself there",
+                 detail: "\(cursorWhileReading) -> \(noisyCursors)")
+
     report.section("the fixed window — the band never moves")
 
     let windowScript = makeLayoutScript([
