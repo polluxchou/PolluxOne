@@ -135,5 +135,28 @@ func runArchiveSuite() async -> (pass: Int, fail: Int) {
                      detail: "\(observer.states)")
     }
 
+    report.section("a failed save keeps the only copy that exists")
+    do {
+        let library = FakePhotoLibrary(saveResult: .failure(FakeSaveError()))
+        let observer = ArchiveObserver()
+        let archiver = TakeArchiver(library: library)
+        archiver.delegate = observer
+        let url = makeTakeFile("save-error")
+
+        archiver.archive(takeAt: url)
+        await archiver.waitForPendingArchives()
+
+        report.check(archiver.state == .failed(.saveFailed("disk full"), retainedFileURL: url),
+                     "the failure names the reason and points at the surviving file",
+                     detail: "\(archiver.state)")
+        report.check(takeFileExists(url),
+                     "the take is NOT deleted when the library refused it")
+        report.check(TakeArchiveMessage.hudText(state: archiver.state, permission: .granted)
+                        == "Save failed — disk full",
+                     "the HUD repeats the library's own reason")
+
+        try? FileManager.default.removeItem(at: url)
+    }
+
     return (report.pass, report.fail)
 }
