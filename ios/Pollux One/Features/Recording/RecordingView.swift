@@ -27,6 +27,10 @@ struct RecordingView: View {
         static let paramsRowBottom: CGFloat = 162
         static let lensSelectorBottom: CGFloat = 112
         static let shutterRowBottom: CGFloat = 24
+        /// Above every bottom control, inside the bottom scrim. NOT in the top
+        /// HUD: that row is placed to flank the Dynamic Island, which swallows
+        /// anything spanning the middle of it.
+        static let archiveStatusBottom: CGFloat = 245
         static let topScrimHeight: CGFloat = 300
         static let bottomScrimHeight: CGFloat = 270
     }
@@ -129,8 +133,7 @@ struct RecordingView: View {
             TopHUDView(
                 isRecording: viewModel.sessionManager.recordingEngine.isRecording,
                 elapsedSeconds: viewModel.sessionManager.recordingEngine.elapsedSeconds,
-                remainingRecordingTime: viewModel.remainingRecordingTime,
-                archiveMessage: viewModel.archiveMessage
+                remainingRecordingTime: viewModel.remainingRecordingTime
             )
             .padding(.horizontal, 18)
             .topAnchored(Offset.statusRowTop)
@@ -192,6 +195,16 @@ struct RecordingView: View {
                 onSelectLens: { viewModel.selectLens($0) }
             )
             .bottomAnchored(Offset.lensSelectorBottom)
+
+            if let archiveMessage = viewModel.archiveMessage {
+                Text(archiveMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                    .padding(.horizontal, 32)
+                    .bottomAnchored(Offset.archiveStatusBottom)
+            }
 
             ShutterRowView(
                 isRecording: viewModel.sessionManager.recordingEngine.isRecording,

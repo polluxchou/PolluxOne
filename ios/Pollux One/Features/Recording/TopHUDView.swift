@@ -4,52 +4,41 @@ import SwiftUI
 /// recording time left. Matches the Claude Design spec exactly — no mic
 /// waveform up here (that lives under the teleprompter now) and no script
 /// progress percentage (the teleprompter's progress rail is the readout).
+///
+/// Nothing else belongs on this row. The two clusters are placed to flank the
+/// Dynamic Island, so anything spanning the middle — a centred status line,
+/// say — is simply swallowed by the cutout.
 struct TopHUDView: View {
     let isRecording: Bool
     let elapsedSeconds: TimeInterval
     let remainingRecordingTime: TimeInterval?
-    /// nil when there is nothing to say — see TakeArchiveMessage.hudText.
-    let archiveMessage: String?
 
     var body: some View {
-        VStack(spacing: 6) {
-            HStack {
-                HStack(spacing: 7) {
-                    Circle()
-                        .fill(HUDColor.recRed)
-                        .frame(width: 7, height: 7)
-                    Text("REC")
-                        .font(.system(size: 11, weight: .bold))
-                        .tracking(1.2)
-                        .foregroundStyle(.white)
-                    Text(Self.elapsedFormatter(elapsedSeconds))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .monospacedDigit()
-                }
-
-                Spacer()
-
-                HStack(spacing: 5) {
-                    Text("LEFT")
-                        .font(.system(size: 9))
-                        .foregroundStyle(.white.opacity(0.5))
-                    Text(remainingRecordingTime.map { Self.remainingFormatter($0) } ?? "—")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.white.opacity(0.85))
-                        .monospacedDigit()
-                }
+        HStack {
+            HStack(spacing: 7) {
+                Circle()
+                    .fill(HUDColor.recRed)
+                    .frame(width: 7, height: 7)
+                Text("REC")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(1.2)
+                    .foregroundStyle(.white)
+                Text(Self.elapsedFormatter(elapsedSeconds))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .monospacedDigit()
             }
 
-            // `if let` rather than opacity: with only 44pt between this row
-            // and the teleprompter at top:60, a zero-opacity line would still
-            // push the prompter down.
-            if let archiveMessage {
-                Text(archiveMessage)
-                    .font(.system(size: 11))
+            Spacer()
+
+            HStack(spacing: 5) {
+                Text("LEFT")
+                    .font(.system(size: 9))
+                    .foregroundStyle(.white.opacity(0.5))
+                Text(remainingRecordingTime.map { Self.remainingFormatter($0) } ?? "—")
+                    .font(.system(size: 12))
                     .foregroundStyle(.white.opacity(0.85))
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: .infinity)
+                    .monospacedDigit()
             }
         }
         .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
