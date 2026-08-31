@@ -22,6 +22,16 @@ struct RecordingView: View {
         static let statusRowTop: CGFloat = 16
         static let teleprompterTop: CGFloat = 60
         static let teleprompterLeading: CGFloat = 20
+        /// Not a competing padding — subtracted from the space the Width
+        /// slider's fraction is taken *of*, alongside the leading inset. The
+        /// fraction still governs the column on its own; this only says how
+        /// much room there is to take a fraction of.
+        ///
+        /// It exists because Width = 1.0 otherwise puts the block's right edge
+        /// exactly on the screen's, which on a rounded display is under the
+        /// corner curvature and reads as broken next to a 20pt left inset.
+        /// 12 is the figure the pre-branch layout used, when it was a padding.
+        static let teleprompterTrailing: CGFloat = 12
         static let exposureSliderBottom: CGFloat = 210
         static let paramsRowBottom: CGFloat = 162
         static let lensSelectorBottom: CGFloat = 112
@@ -157,17 +167,29 @@ struct RecordingView: View {
             // here rather than inside the overlay, because the fraction is of
             // the screen, and it is what decides where lines break.
             //
-            // There is deliberately no trailing padding to balance the leading
-            // one any more. The fraction governs the column's width; a second
-            // inset pulling on the same edge would leave two things deciding
-            // one number, and the slider's effect would stop being predictable.
+            // The fraction is of the space that is *left* once both insets are
+            // taken out, not of the whole screen. Taking it of the whole screen
+            // and then adding a leading padding makes the padded block
+            // `width × fraction + 20` wide, which at Width = 1.0 is wider than
+            // the screen — and an oversized child is centred by the anchor
+            // below whatever its alignment says, so the block hung 10pt off
+            // *both* edges. Subtracting first keeps the fraction as the single
+            // master of the column's width while making the left inset exactly
+            // 20 at every slider position.
             .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
-                width * viewModel.teleprompterSettings.textWidthFraction
+                (width - Offset.teleprompterLeading - Offset.teleprompterTrailing)
+                    * viewModel.teleprompterSettings.textWidthFraction
             }
             .opacity(viewModel.teleprompterSettings.opacity)
             .offset(y: viewModel.teleprompterSettings.verticalOffset)
             .padding(.leading, Offset.teleprompterLeading)
-            .topAnchored(Offset.teleprompterTop)
+            // `.topLeading`, not the default `.top`: `.top`'s horizontal
+            // component is `.center`, which was a no-op while the overlay
+            // filled the offered width and started sliding the whole block
+            // sideways the moment containerRelativeFrame made it narrower.
+            // Measured in a 393pt container, the default fraction put the left
+            // edge at 37.51 instead of 20, and dragging the slider moved it.
+            .topAnchored(Offset.teleprompterTop, alignment: .topLeading)
         }
     }
 
@@ -268,8 +290,16 @@ private extension View {
     }
 
     /// The `top:Npx` counterpart.
-    func topAnchored(_ inset: CGFloat) -> some View {
-        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    ///
+    /// `alignment` defaults to `.top` — whose *horizontal* component is
+    /// `.center` — because that is what both callers wanted while both filled
+    /// the offered width. Anything narrower than the container has to say
+    /// `.topLeading` explicitly or it drifts to the middle. Left as a
+    /// parameter rather than a changed default so `TopHUDView`, which still
+    /// fills its width via an `HStack` with a `Spacer`, keeps the behaviour it
+    /// was written against.
+    func topAnchored(_ inset: CGFloat, alignment: Alignment = .top) -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
             .padding(.top, inset)
     }
 }

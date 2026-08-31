@@ -126,9 +126,10 @@ struct TeleprompterOverlayView: View {
     /// `Color.clear` hands back exactly the width proposed to it — it has no
     /// content whose size could enter the answer — and a `VStack` passes its
     /// own horizontal proposal across to each child untouched. So this reads
-    /// `screenWidth × textWidthFraction`, the offer `RecordingView` makes with
-    /// `containerRelativeFrame`, no matter what the text is doing. That
-    /// immunity to content is the whole requirement; see `offeredWidth`.
+    /// the offer `RecordingView` makes with `containerRelativeFrame`,
+    /// `(screenWidth − teleprompterLeading − teleprompterTrailing) ×
+    /// textWidthFraction`, no matter what the text is doing. That immunity to
+    /// content is the whole requirement; see `offeredWidth`.
     ///
     /// The design note reaches the same width with a `GeometryReader` wrapped
     /// around the block. A `GeometryReader` is greedy on both axes, though, so
