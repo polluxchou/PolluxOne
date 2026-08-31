@@ -115,7 +115,10 @@ final class SpeechRecognitionService: NSObject {
         request = nil
         task = nil
         isRunning = false
-        AudioSessionController.deactivate()
+        // Deliberately does NOT deactivate the audio session: the capture
+        // session outlives any one take and shares it, so deactivating here
+        // interrupted the camera the moment you stopped recording. Ending the
+        // session is SessionManager.teardown()'s job.
     }
 }
 

@@ -1,9 +1,13 @@
 import SwiftUI
 
-/// LENS · EV · FOCUS · DEPTH · FORMAT. Each value IS the entry point into
-/// its control — tapping "EV -0.3" opens exposure adjustment, no separate
-/// row of icon buttons. A parameter only appears when the device/mode
-/// actually supports it (DeviceCapabilityService decides that upstream).
+/// The parameter row. Each value IS the entry point into its control —
+/// tapping "EV -0.3" opens exposure adjustment, no separate row of icon
+/// buttons.
+///
+/// Which columns appear is the camera's answer, not a per-side constant:
+/// `CameraConfiguration.visibleParameters` asks the hardware, so the
+/// multi-lens back camera earns five columns (its mm and ƒ both move as you
+/// switch lenses) and the single-lens front camera gets three.
 struct BottomCameraParamsView: View {
     let configuration: CameraConfiguration
     let activeParameter: CameraParameter?
@@ -11,50 +15,41 @@ struct BottomCameraParamsView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // Column order/content fixed here; DEPTH is the only one that's
-            // conditionally hidden (front-camera aperture isn't simulatable).
-            ParamButton(
-                title: "LENS",
-                value: "\(Int(configuration.focalLengthMillimeters))mm",
-                isActive: activeParameter == .lens
-            ) { onSelect(.lens) }
-
-            ParamButton(
-                title: "EV",
-                value: evLabel,
-                isActive: activeParameter == .exposure
-            ) { onSelect(.exposure) }
-
-            ParamButton(
-                title: "FOCUS",
-                value: configuration.focusMode == .locked ? "LOCK" : "AUTO",
-                isActive: activeParameter == .focus
-            ) { onSelect(.focus) }
-
-            if let aperture = configuration.apertureF, configuration.supportsDepth {
+            ForEach(configuration.visibleParameters, id: \.self) { parameter in
                 ParamButton(
-                    title: "DEPTH",
-                    value: String(format: "ƒ%.1f", aperture),
-                    isActive: activeParameter == .depth
-                ) { onSelect(.depth) }
+                    title: title(for: parameter),
+                    value: value(for: parameter),
+                    isActive: activeParameter == parameter
+                ) { onSelect(parameter) }
             }
-
-            ParamButton(
-                title: "FORMAT",
-                value: "\(configuration.resolution.rawValue)·\(configuration.frameRate.rawValue)",
-                isActive: activeParameter == .format
-            ) { onSelect(.format) }
         }
     }
 
-    private var evLabel: String {
-        let bias = configuration.exposureBiasEV
-        return bias == 0 ? "0.0" : String(format: "%+.1f", bias)
+    private func title(for parameter: CameraParameter) -> String {
+        switch parameter {
+        case .lens: return "LENS"
+        case .exposure: return "EV"
+        case .focus: return "FOCUS"
+        case .depth: return "DEPTH"
+        case .format: return "FORMAT"
+        }
     }
-}
 
-enum CameraParameter: Equatable {
-    case lens, exposure, focus, depth, format
+    private func value(for parameter: CameraParameter) -> String {
+        switch parameter {
+        case .lens:
+            return "\(Int(configuration.focalLengthMillimeters.rounded()))mm"
+        case .exposure:
+            let bias = configuration.exposureBiasEV
+            return bias == 0 ? "0.0" : String(format: "%+.1f", bias)
+        case .focus:
+            return configuration.focusMode == .locked ? "LOCK" : "AUTO"
+        case .depth:
+            return configuration.apertureF.map { String(format: "ƒ%.1f", $0) } ?? "—"
+        case .format:
+            return "\(configuration.resolution.rawValue)·\(configuration.frameRate.rawValue)"
+        }
+    }
 }
 
 private struct ParamButton: View {
