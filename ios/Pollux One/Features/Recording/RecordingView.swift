@@ -63,6 +63,20 @@ struct RecordingView: View {
             topGroup
             bottomGroup
 
+            if let speechError = viewModel.sessionManager.speechError {
+                // A prompter that never moves looks identical to a broken
+                // algorithm, so say which it is.
+                Text(speechError)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(12)
+                    .background(HUDColor.recRed.opacity(0.85), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(.horizontal, 32)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .allowsHitTesting(false)
+            }
+
             if let command = viewModel.sessionManager.pendingVoiceCommand {
                 VoiceCommandConfirmationView(
                     command: command,

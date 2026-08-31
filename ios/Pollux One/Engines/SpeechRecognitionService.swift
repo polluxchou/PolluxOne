@@ -22,12 +22,26 @@ final class SpeechRecognitionService: NSObject {
 
     private(set) var isRunning = false
 
+    /// Both grants are needed and they are separate: speech recognition
+    /// authorization alone leaves the microphone unavailable, so the engine
+    /// starts and receives nothing.
     func requestAuthorization() async -> Bool {
-        await withCheckedContinuation { continuation in
+        let speechGranted = await withCheckedContinuation { continuation in
             SFSpeechRecognizer.requestAuthorization { status in
                 continuation.resume(returning: status == .authorized)
             }
         }
+        let micGranted = await AudioSessionController.requestMicrophonePermission()
+        return speechGranted && micGranted
+    }
+
+    /// Picks the recognizer locale from the script's own language: a Chinese
+    /// script fed to an en-US recognizer transcribes to noise, and no amount
+    /// of alignment tolerance recovers from that.
+    static func locale(forScriptText text: String) -> Locale {
+        let cjk = text.unicodeScalars.count { (0x4E00...0x9FFF).contains($0.value) }
+        let isCJK = !text.isEmpty && Double(cjk) / Double(text.unicodeScalars.count) > 0.2
+        return Locale(identifier: isCJK ? "zh-CN" : "en-US")
     }
 
     func start(locale: Locale = Locale(identifier: "en-US")) throws {
@@ -37,6 +51,14 @@ final class SpeechRecognitionService: NSObject {
             throw SpeechRecognitionError.unavailable
         }
         self.recognizer = recognizer
+
+        // Must come before touching audioEngine.inputNode: without an active
+        // session the engine refuses to start and no audio ever arrives.
+        do {
+            try AudioSessionController.activateForRecording()
+        } catch {
+            throw SpeechRecognitionError.audioSessionFailed(error)
+        }
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -57,7 +79,13 @@ final class SpeechRecognitionService: NSObject {
         }
 
         audioEngine.prepare()
-        try audioEngine.start()
+        do {
+            try audioEngine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            self.request = nil
+            throw SpeechRecognitionError.audioEngineFailed(error)
+        }
         isRunning = true
 
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
@@ -87,9 +115,23 @@ final class SpeechRecognitionService: NSObject {
         request = nil
         task = nil
         isRunning = false
+        AudioSessionController.deactivate()
     }
 }
 
-enum SpeechRecognitionError: Error {
+enum SpeechRecognitionError: LocalizedError {
     case unavailable
+    case audioSessionFailed(Error)
+    case audioEngineFailed(Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable:
+            return "Speech recognition isn't available for this language on this device."
+        case .audioSessionFailed(let error):
+            return "Couldn't start the microphone: \(error.localizedDescription)"
+        case .audioEngineFailed(let error):
+            return "Couldn't listen for your voice: \(error.localizedDescription)"
+        }
+    }
 }

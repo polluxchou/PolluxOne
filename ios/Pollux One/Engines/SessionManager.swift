@@ -14,6 +14,9 @@ final class SessionManager {
     private(set) var readingSession: ReadingSession?
     private(set) var voiceCommandState: VoiceCommandEngineState = .idle
     private(set) var pendingVoiceCommand: VoiceCommand?
+    /// Non-nil when listening failed to start. Surfaced on the HUD so a
+    /// prompter that isn't following is distinguishable from a mic problem.
+    private(set) var speechError: String?
 
     let cameraEngine: CameraEngine
     let recordingEngine: RecordingEngine
@@ -49,7 +52,13 @@ final class SessionManager {
         readingSession = nil
 
         await cameraEngine.requestAuthorizationAndConfigure()
-        _ = await speechService.requestAuthorization()
+        // Speech + microphone are separate grants; without both, reading
+        // position can never update.
+        if await speechService.requestAuthorization() {
+            speechError = nil
+        } else {
+            speechError = "Microphone or speech access denied — the prompter can't follow you. Enable both in Settings."
+        }
     }
 
     func startTake() {
@@ -71,10 +80,29 @@ final class SessionManager {
             isPaused: false
         )
 
+        // Every take starts from the top of the script, so the engines that
+        // carry a position have to be rewound too. Resetting only
+        // readingSession left the alignment engine and the prompter showing
+        // wherever the previous take ended.
+        alignmentEngine.reset(script: revision.script, startingAt: nil)
+        teleprompterEngine.load(script: revision.script)
+        safeWordDetector.reset()
+        latestTranscriptText = ""
+
         recordingEngine.startRecording()
         audioLevelMonitor.startDisplayUpdates()
-        safeWordDetector.reset()
-        try? speechService.start()
+
+        do {
+            try speechService.start(
+                locale: SpeechRecognitionService.locale(forScriptText: revision.script.fullText)
+            )
+            speechError = nil
+        } catch {
+            // Swallowing this is what makes a broken microphone look exactly
+            // like a broken alignment algorithm: the prompter simply never
+            // moves and nothing says why.
+            speechError = error.localizedDescription
+        }
     }
 
     func endTake() {
@@ -147,8 +175,11 @@ extension SessionManager: SpeechRecognitionServiceDelegate {
             guard case .idle = voiceCommandEngine.state else { return }
             guard let position = alignmentEngine.ingest(transcript: transcript) else { return }
             readingSession?.currentPosition = position
-            readingSession?.progress = teleprompterEngine.displayState.progress
+            // Update before reading progress back: the engine derives progress
+            // from the new position, so reading it first stored the previous
+            // sentence's value.
             teleprompterEngine.update(position: position)
+            readingSession?.progress = teleprompterEngine.displayState.progress
         }
     }
 

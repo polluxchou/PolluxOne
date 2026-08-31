@@ -190,8 +190,10 @@ Web 侧：`cd web && npm run lint && npm run build`。
 - **Backend**：11 张表 + RLS + 两个 trigger，在本地 Postgres 17 跑过插入测试。
 
 **尚未实现／未验证：**
-- **真机验证**：算法在离线场景上全过，但真实 ASR 的口音、噪音、识别延迟会怎样
-  影响，只有真机念稿子才知道。这是目前最大的未知。
+- **真机验证**：算法在离线场景上全过，麦克风链路（AVAudioSession、麦克风权限、
+  录像音轨、按稿子语言选识别 locale）也都接好了，但**从来没在真麦克风上跑过**。
+  真实 ASR 的口音、噪音、识别延迟会怎样影响，只有真机念稿子才知道。这是目前
+  最大的未知。
 - iOS 还没接真实 Supabase（`MockBackendClient` → `SupabaseBackendClient`，
   接口已就位，改 `AppEnvironment` 一处即可）。
 - Voice Command 是关键词匹配（`change this to…` / `把这段改成…` 等十几个
@@ -212,7 +214,7 @@ Web 侧：`cd web && npm run lint && npm run build`。
    `./scripts/test-engines.sh` 确认没有回退。
 5. Safe Word → Voice Command 的解析做得更鲁棒。
 
-## 当前最大的三个技术风险
+## 当前最大的技术风险
 
 1. **真实 ASR 质量是最大未知**。离线 36 个场景全过说明对齐逻辑本身是对的，
    但那些 transcript 是我写的、干净的。真实的 Speech framework 输出会有识别
@@ -222,8 +224,16 @@ Web 侧：`cd web && npm run lint && npm run build`。
 2. **Recording Session 冻结版本 + Safe Word 本地编辑 + 事后合并回云端**这条
    链路目前只有 iOS 侧的内存实现，`ScriptSyncService.syncEditsToCloud()` 还
    没有对着真实 Supabase 跑过；Web 同时编辑同一篇稿子时的冲突处理策略还没定。
-3. **AVFoundation 并发/线程模型**：`CameraEngine` 把 session 配置放在专用
-   `DispatchQueue`，在当前 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 的工程
-   设置下会有几处 Sendable 警告（已确认是警告不是错误，编译通过），中期应该
-   把 CameraEngine 收敛成一个 actor 或彻底切到 MainActor 上跑 session 配置，
-   避免以后升级到 Swift 6 严格并发检查时踩坑。
+3. **麦克风被两个消费者争用，只能真机验证**。录像走
+   `AVCaptureMovieFileOutput`（含音轨），语音识别走 `AVAudioEngine` 的
+   inputNode，两者共用同一个 `AVAudioSession`。这是最简单的接法，但 iOS 上
+   AVCaptureSession 的音频输入和 AVAudioEngine 同时取麦克风有可能互相打断——
+   模拟器无麦克风，无法验证。如果真机上确实冲突，正解是改成
+   `AVAssetWriter` + `AVCaptureVideoDataOutput`/`AVCaptureAudioDataOutput`，
+   由采集会话独占麦克风、把同一份音频 buffer 同时喂给写文件和
+   `SFSpeechAudioBufferRecognitionRequest.appendAudioSampleBuffer(_:)`。
+   现在启动失败会在 HUD 上红条报错，不会静默不动。
+4. **AVFoundation 并发/线程模型**：`CameraEngine` 把 session 配置放在专用
+   `DispatchQueue`，在当前 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` 下有
+   几处 Sendable 警告（是警告不是错误，编译通过），中期应把它收敛成 actor，
+   避免升到 Swift 6 严格并发检查时踩坑。

@@ -21,6 +21,7 @@ final class CameraEngine: NSObject {
     private let capabilityService = DeviceCapabilityService()
     private var videoDevice: AVCaptureDevice?
     private var videoInput: AVCaptureDeviceInput?
+    private var audioInput: AVCaptureDeviceInput?
 
     func requestAuthorizationAndConfigure() async {
         let granted = await withCheckedContinuation { continuation in
@@ -48,6 +49,10 @@ final class CameraEngine: NSObject {
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             sessionQueue.async { [weak self] in
                 guard let self else { continuation.resume(); return }
+                // AudioSessionController is the single owner of category/mode;
+                // left on, AVCaptureSession would reconfigure the session
+                // behind SpeechRecognitionService's back.
+                self.session.automaticallyConfiguresApplicationAudioSession = false
                 self.session.beginConfiguration()
                 self.session.sessionPreset = .high
 
@@ -59,6 +64,22 @@ final class CameraEngine: NSObject {
                     }
                 } catch {
                     Task { @MainActor in self.lastError = "Failed to open camera: \(error.localizedDescription)" }
+                }
+
+                // Without an audio input the take records silently — a
+                // talking-head video with no voice on it.
+                if let microphone = AVCaptureDevice.default(for: .audio) {
+                    do {
+                        let audioInput = try AVCaptureDeviceInput(device: microphone)
+                        if self.session.canAddInput(audioInput) {
+                            self.session.addInput(audioInput)
+                            self.audioInput = audioInput
+                        }
+                    } catch {
+                        Task { @MainActor in
+                            self.lastError = "Recording will have no sound: \(error.localizedDescription)"
+                        }
+                    }
                 }
 
                 if self.session.canAddOutput(self.movieOutput) {
