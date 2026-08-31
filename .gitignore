@@ -1,0 +1,22 @@
+# iOS / Xcode
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/**/DerivedData/
+ios/build/
+ios/.build/
+
+# Web / Next.js
+web/node_modules/
+web/.next/
+web/out/
+web/.env*
+!web/.env.local.example
+web/next-env.d.ts
+web/*.tsbuildinfo
+
+# Backend / Supabase
+backend/supabase/.branches/
+backend/supabase/.temp/
+
+# OS
+.DS_Store
