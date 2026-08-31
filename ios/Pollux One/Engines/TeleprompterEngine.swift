@@ -207,7 +207,9 @@ final class TeleprompterEngine {
         readingProgress = makeProgress(totalCharacters: lines[lines.count - 1].characterRange.upperBound)
     }
 
-    /// The one place `displayState` is written.
+    /// The one place the line window is written. `setVisible` assigns
+    /// `displayState` too, but only to flip `isVisible` — which the overlay
+    /// reads to decide whether to draw at all, and which no tick touches.
     ///
     /// The equality guard stops a 30Hz tick from telling observers the line
     /// window moved when it did not. That matters more here than usual: the
