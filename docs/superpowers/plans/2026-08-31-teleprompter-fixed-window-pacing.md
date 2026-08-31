@@ -1422,7 +1422,7 @@ git commit -m "Pace the prompter from measured reading speed, capped ahead of th
 
 这个 Task 里有两条容易被实现掉的约束：
 
-1. **`displayState` 的赋值必须有相等性守卫。** `@Observable` 不做去重——赋一个相等的值仍然通知观察者。没有守卫，30Hz 的 tick 每秒会把整块文字 diff 30 次，固定行窗的性能前提就没了。
+1. **`TeleprompterDisplayState` 必须是 `Equatable`，写入点保留相等性守卫。** Swift 6.3.3 的 `@Observable` 对 `Equatable` 载荷**会**在 registrar 层面去重（实测：相等赋值 0 次通知；非 `Equatable` 载荷则 1 次），所以挡住 30Hz re-diff 的是那个 conformance，不是守卫。守卫是防御性的：把意图写在看得见的地方，并在有人手写 `==` 出错时再拦一道。这个不变量由编译器保证——加一个非 `Equatable` 字段会让合成的 conformance 直接编译失败。
 2. **`load(script:startingAt:)` 必须能从指定地址开始。** `SessionManager.applyParagraphReplacement` 在安全词改稿后调 `load`，那里有一条明确的既有承诺——"Realign from the same address so the reader doesn't visually jump"。无参 `load` 会把光标打回 0，改一句话就把读者踢回脚本开头。
 
 **Files:**
@@ -1728,8 +1728,13 @@ final class TeleprompterEngine {
         lastTickUptime = nil
         // 30Hz: one Double and one shape redraw per tick. AudioLevelMonitor
         // already runs the same shape of work at 15Hz beside the camera.
+        // `guard let self` before the Task, matching AudioLevelMonitor:
+        // `self?.` inside the concurrently-executing closure reaches through a
+        // mutable binding, which warns today and is an error under the Swift 6
+        // language mode.
         tickTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tickFromClock() }
+            guard let self else { return }
+            Task { @MainActor in self.tickFromClock() }
         }
     }
 

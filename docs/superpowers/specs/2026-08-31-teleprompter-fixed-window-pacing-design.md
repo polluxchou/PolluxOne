@@ -385,6 +385,23 @@ VStack 自然下移，clip 出上方空白，衬底位置分毫不动。结尾�
 存储属性。`@Observable` 按属性粒度追踪读取，只有读它们的那两层（当前行的高亮填充、
 右侧进度轨）会失效重绘。
 
+**关于 `@Observable` 是否去重（实测修正）。** 本文早前的版本断言"`@Observable` 不做
+去重，赋一个相等的值仍然通知观察者"，因此需要在写入点加相等性守卫。这在 Swift 6.3.3
+上是**错的**。用 `withObservationTracking` 实测：
+
+| 载荷类型 | 赋值 | 通知 |
+|---|---|---|
+| `Equatable` | 相等值 | **0** |
+| `Equatable` | 不同值 | 有 |
+| 非 `Equatable` | 相等值 | **1** |
+
+所以真正挡住 30Hz re-diff 的是 **`TeleprompterDisplayState: Equatable` 这个
+conformance**。这反而是个更强的保证：合成的 `Equatable` 意味着谁往这个 struct 里加一个
+非 `Equatable` 字段会直接编译失败，不需要运行时守卫、也没法用离线场景去钉住它。
+
+写入点仍然保留一行相等性守卫，但它是**防御性的、不是承重的**：把意图写在看得见的地方，
+并且在有人手写 `==` 而写错时仍然拦一道。
+
 tick 用 `Timer.scheduledTimer` 1/30s，沿用 `AudioLevelMonitor.startDisplayUpdates()`
 已经在用的模式（那里是 1/15s）。
 
