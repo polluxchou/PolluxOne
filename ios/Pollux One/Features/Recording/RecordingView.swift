@@ -15,6 +15,7 @@ struct RecordingView: View {
 
     @State private var focusPoint: CGPoint?
     @State private var focusHideTask: Task<Void, Never>?
+    @State private var previewProxy = CameraPreviewProxy()
 
     /// Spec offsets, named so the intent survives a redesign.
     private enum Offset {
@@ -26,13 +27,21 @@ struct RecordingView: View {
         static let paramsRowBottom: CGFloat = 162
         static let lensSelectorBottom: CGFloat = 112
         static let shutterRowBottom: CGFloat = 24
+        /// Above every bottom control, inside the bottom scrim. NOT in the top
+        /// HUD: that row is placed to flank the Dynamic Island, which swallows
+        /// anything spanning the middle of it.
+        static let archiveStatusBottom: CGFloat = 245
         static let topScrimHeight: CGFloat = 300
         static let bottomScrimHeight: CGFloat = 270
     }
 
-    init(script: Script, syncService: ScriptSyncService) {
+    init(script: Script, syncService: ScriptSyncService, takeArchiver: TakeArchiver) {
         self.script = script
-        let sessionManager = SessionManager(syncService: syncService, alignmentEngine: SlidingWindowAlignmentEngine())
+        let sessionManager = SessionManager(
+            syncService: syncService,
+            alignmentEngine: SlidingWindowAlignmentEngine(),
+            takeArchiver: takeArchiver
+        )
         _viewModel = State(initialValue: RecordingViewModel(sessionManager: sessionManager))
     }
 
@@ -93,6 +102,8 @@ struct RecordingView: View {
         // lens. Edge-swipe still returns to the script list.
         .toolbar(.hidden, for: .navigationBar)
         .task { await viewModel.start(script: script) }
+        .onChange(of: viewModel.activeParameter) { _, _ in scheduleFocusReticleHide() }
+        .onDisappear { viewModel.sessionManager.teardown() }
     }
 
     // MARK: - Layers
@@ -102,11 +113,16 @@ struct RecordingView: View {
         if viewModel.sessionManager.cameraEngine.isSessionRunning {
             CameraPreviewView(
                 session: viewModel.sessionManager.cameraEngine.session,
-                onTapToFocus: { point, layerPoint in
-                    viewModel.sessionManager.cameraEngine.focus(at: point)
-                    showFocusReticle(at: layerPoint)
-                }
+                proxy: previewProxy
             )
+            // Tap-to-focus belongs to SwiftUI so the HUD's buttons, which sit
+            // above the preview in this ZStack, consume their own taps instead
+            // of also refocusing the camera wherever they happen to be.
+            .onTapGesture { location in
+                guard let devicePoint = previewProxy.devicePoint(for: location) else { return }
+                viewModel.sessionManager.cameraEngine.focusAndMeter(at: devicePoint)
+                showFocusReticle(at: location)
+            }
         } else {
             CameraUnavailablePlaceholder(message: viewModel.sessionManager.cameraEngine.lastError)
         }
@@ -126,6 +142,7 @@ struct RecordingView: View {
                 state: viewModel.sessionManager.teleprompterEngine.displayState,
                 textSize: viewModel.teleprompterSettings.textSize,
                 micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
+                cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
                 onTap: { viewModel.openTeleprompterAdjust() }
             )
             .opacity(viewModel.teleprompterSettings.opacity)
@@ -152,6 +169,16 @@ struct RecordingView: View {
                     onChange: { viewModel.sessionManager.cameraEngine.setExposureBias($0) }
                 )
                 .bottomAnchored(Offset.exposureSliderBottom)
+            } else if viewModel.activeParameter == .format {
+                FormatPickerView(
+                    resolution: viewModel.sessionManager.cameraEngine.configuration.resolution,
+                    frameRate: viewModel.sessionManager.cameraEngine.configuration.frameRate,
+                    availableResolutions: viewModel.sessionManager.cameraEngine.configuration.availableResolutions,
+                    availableFrameRates: viewModel.sessionManager.cameraEngine.configuration.availableFrameRates,
+                    isEnabled: viewModel.canChangeFormat,
+                    onSelect: { viewModel.selectFormat(resolution: $0, frameRate: $1) }
+                )
+                .bottomAnchored(Offset.exposureSliderBottom)
             }
 
             BottomCameraParamsView(
@@ -163,16 +190,28 @@ struct RecordingView: View {
             .bottomAnchored(Offset.paramsRowBottom)
 
             LensSelectorView(
-                availableLenses: viewModel.sessionManager.cameraEngine.configuration.availableLensPositions,
+                lenses: viewModel.sessionManager.cameraEngine.configuration.availableLenses,
                 currentLens: viewModel.sessionManager.cameraEngine.configuration.lensPosition,
                 onSelectLens: { viewModel.selectLens($0) }
             )
             .bottomAnchored(Offset.lensSelectorBottom)
 
+            if let archiveMessage = viewModel.archiveMessage {
+                Text(archiveMessage)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.white.opacity(0.85))
+                    .multilineTextAlignment(.center)
+                    .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
+                    .padding(.horizontal, 32)
+                    .bottomAnchored(Offset.archiveStatusBottom)
+            }
+
             ShutterRowView(
                 isRecording: viewModel.sessionManager.recordingEngine.isRecording,
                 safeWordLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
                 safeWord: "Pollux",
+                facing: viewModel.sessionManager.cameraEngine.configuration.facing,
+                canFlip: viewModel.canFlipCamera,
                 onToggleRecording: { viewModel.toggleRecording() },
                 onFlip: { viewModel.flipCamera() }
             )
@@ -184,6 +223,16 @@ struct RecordingView: View {
     private func showFocusReticle(at point: CGPoint) {
         focusHideTask?.cancel()
         withAnimation { focusPoint = point }
+        scheduleFocusReticleHide()
+    }
+
+    /// While the EV control is open the reticle marks the spot the camera is
+    /// metering, which is the thing the slider is working against — so it
+    /// stays put until that control closes. Setting the point and then riding
+    /// exposure against it is one continuous action, not two.
+    private func scheduleFocusReticleHide() {
+        focusHideTask?.cancel()
+        guard viewModel.activeParameter != .exposure else { return }
         focusHideTask = Task {
             try? await Task.sleep(for: .seconds(1.2))
             guard !Task.isCancelled else { return }

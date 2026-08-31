@@ -13,6 +13,9 @@ struct TeleprompterOverlayView: View {
     let state: TeleprompterDisplayState
     var textSize: CGFloat = 19
     var micLevel: Float = 0
+    /// Only used to warn: the prompter's whole premise is that it sits beside
+    /// the lens, which stops being true the moment capture moves to the back.
+    var cameraFacing: CameraFacing = .front
     var onTap: () -> Void
 
     private let rowGap: CGFloat = 4
@@ -59,10 +62,16 @@ struct TeleprompterOverlayView: View {
                         }
                 }
 
-                MicLevelBarView(level: micLevel)
-                    .padding(.top, 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .containerRelativeFrame(.horizontal) { width, _ in width * 0.45 }
+                HStack(spacing: 8) {
+                    MicLevelBarView(level: micLevel)
+                        .containerRelativeFrame(.horizontal) { width, _ in width * 0.45 }
+
+                    if cameraFacing == .back {
+                        BackCameraNotice()
+                    }
+                }
+                .padding(.top, 10)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
             .contentShape(Rectangle())
             .onTapGesture(perform: onTap)
@@ -158,6 +167,27 @@ struct TeleprompterOverlayView: View {
             .padding(.bottom, bleedBottom ? -railBleed : 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, leading)
+    }
+}
+
+/// Says out loud what the back camera costs. Every other decision in this app
+/// is checked against "does this help the speaker hold eye contact with the
+/// lens"; shooting from the back is the one state where the answer is no, and
+/// a take is easier to fix now than in review.
+private struct BackCameraNotice: View {
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: "eye.slash")
+                .font(.system(size: 9))
+            Text("BACK LENS · NO EYE CONTACT")
+                .font(.system(size: 8.5, weight: .semibold))
+                .tracking(0.8)
+        }
+        .fixedSize()
+        .foregroundStyle(HUDColor.iosYellow)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(.black.opacity(0.45), in: Capsule())
     }
 }
 

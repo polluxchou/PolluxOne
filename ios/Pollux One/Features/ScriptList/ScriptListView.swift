@@ -6,9 +6,11 @@ import SwiftUI
 struct ScriptListView: View {
     @State private var viewModel: ScriptListViewModel
     private let syncService: ScriptSyncService
+    private let takeArchiver: TakeArchiver
 
-    init(syncService: ScriptSyncService) {
+    init(syncService: ScriptSyncService, takeArchiver: TakeArchiver) {
         self.syncService = syncService
+        self.takeArchiver = takeArchiver
         _viewModel = State(wrappedValue: ScriptListViewModel(syncService: syncService))
     }
 
@@ -26,7 +28,11 @@ struct ScriptListView: View {
                 } else {
                     List(viewModel.scripts) { script in
                         NavigationLink {
-                            RecordingView(script: script, syncService: syncService)
+                            RecordingView(
+                                script: script,
+                                syncService: syncService,
+                                takeArchiver: takeArchiver
+                            )
                         } label: {
                             ScriptRow(script: script)
                         }

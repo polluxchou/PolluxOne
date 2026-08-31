@@ -4,6 +4,10 @@ import SwiftUI
 /// recording time left. Matches the Claude Design spec exactly — no mic
 /// waveform up here (that lives under the teleprompter now) and no script
 /// progress percentage (the teleprompter's progress rail is the readout).
+///
+/// Nothing else belongs on this row. The two clusters are placed to flank the
+/// Dynamic Island, so anything spanning the middle — a centred status line,
+/// say — is simply swallowed by the cutout.
 struct TopHUDView: View {
     let isRecording: Bool
     let elapsedSeconds: TimeInterval

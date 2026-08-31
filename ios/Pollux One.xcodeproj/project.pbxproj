@@ -258,6 +258,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pollux One uses the camera to record you while you read from the teleprompter.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Pollux One uses the microphone to record your video's audio and to follow along as you read.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Pollux One saves the takes you record to your photo library.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Pollux One uses on-device speech recognition to match your voice to the script and to detect the \"Pollux\" safe word.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -295,6 +296,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "Pollux One uses the camera to record you while you read from the teleprompter.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Pollux One uses the microphone to record your video's audio and to follow along as you read.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Pollux One saves the takes you record to your photo library.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Pollux One uses on-device speech recognition to match your voice to the script and to detect the \"Pollux\" safe word.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
