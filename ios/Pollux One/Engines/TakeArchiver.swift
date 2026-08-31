@@ -56,6 +56,12 @@ final class TakeArchiver {
         permission = await library.requestAddPermission()
     }
 
+    /// Recording itself failed, so there is no file to archive and nothing
+    /// left on disk worth preserving.
+    func recordingFailed(_ message: String) {
+        update(.failed(.saveFailed(message), retainedFileURL: nil))
+    }
+
     private func drain() async {
         while !queue.isEmpty {
             let url = queue.removeFirst()
