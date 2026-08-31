@@ -29,6 +29,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/VoiceCommand.swift" \
   "$IOS/Domain/TakeArchive.swift" \
   "$IOS/Engines/ScriptAlignmentEngine.swift" \
+  "$IOS/Engines/ReadingPacer.swift" \
   "$IOS/Engines/SafeWordDetector.swift" \
   "$IOS/Engines/VoiceCommandEngine.swift" \
   "$IOS/Engines/TakeArchiver.swift" \
@@ -39,6 +40,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   ios/EngineHarness/CameraScenarios.swift \
   ios/EngineHarness/ArchiveScenarios.swift \
   ios/EngineHarness/LayoutScenarios.swift \
+  ios/EngineHarness/PacingScenarios.swift \
   ios/EngineHarness/main.swift \
   -o "$OUT/engine_harness"
 
