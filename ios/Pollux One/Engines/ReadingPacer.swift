@@ -1,0 +1,145 @@
+import Foundation
+
+/// Turns the discrete, laggy output of speech alignment into a cursor that
+/// moves continuously.
+///
+/// The cursor is a *fractional character offset* into
+/// `PromptScriptText.text`. Characters rather than lines or points because
+/// the offset then survives re-layout for free: changing the type size or the
+/// column width changes which line holds a character, never which character
+/// the reader is on.
+///
+/// Two halves:
+///
+/// - **Dead reckoning.** Between recognizer results the cursor advances at the
+///   reader's measured rate, so the prompter glides instead of freezing and
+///   then lurching when the next result lands. Recognizer results arrive every
+///   0.3–0.8s; without this, that interval is dead air on screen.
+/// - **Correction.** Each result is the truth. A small disagreement is bled off
+///   over the next few results, so no single step is visible. A large one means
+///   the reader skipped or went back — that is a seek, not drift.
+///
+/// Time is a parameter on every method, never read from a clock. The engine
+/// passes real time; the offline suite passes synthetic time and gets
+/// deterministic behaviour out of a component whose whole job is rates.
+@MainActor
+final class ReadingPacer {
+    /// Fractional character offset. The integer part locates a line, the
+    /// fraction is how far along that line the reader is.
+    private(set) var cursor: Double = 0
+    /// Measured reading speed in characters per second.
+    private(set) var rate: Double
+
+    private var language: ScriptLanguage
+    private var lastTruth: Double = 0
+    private var lastTruthTime: TimeInterval?
+
+    /// Fraction of the disagreement taken out per result. 0.25 closes a gap in
+    /// three or four results — roughly half a second of speech — with no
+    /// single step large enough to read as a jump.
+    private let correctionGain = 0.25
+    /// Weight of a new rate sample. Reading speed drifts across a paragraph;
+    /// it does not change word to word, so the estimate is deliberately slow.
+    private let rateSmoothing = 0.25
+    /// Below this, a result is noise rather than a measurement. Position is
+    /// still trusted — see `correct(to:confidence:at:seekThreshold:)`.
+    private let minimumRateConfidence = 0.5
+
+    init(language: ScriptLanguage) {
+        self.language = language
+        self.rate = language.defaultCharactersPerSecond
+    }
+
+    func reset(to offset: Double, language: ScriptLanguage) {
+        self.language = language
+        cursor = offset
+        rate = language.defaultCharactersPerSecond
+        lastTruth = offset
+        lastTruthTime = nil
+    }
+
+    /// Advance by one display tick.
+    ///
+    /// `lookaheadCap` is the whole safety story. Uncapped dead reckoning is
+    /// not a smoothing trick but a bug: a reader who stops to drink water, is
+    /// interrupted, or whose recognizer drops a stretch gets scrolled to the
+    /// end of the script at a steady 5 characters a second. Capped a little
+    /// past the current line, a pause parks the cursor within a line of the
+    /// last thing actually heard — and the highlight visibly stopping *is* the
+    /// signal that the prompter is no longer following, so no extra HUD
+    /// message is needed.
+    ///
+    /// A cursor already at or beyond the cap holds rather than rewinding: the
+    /// cap tightens whenever the current line is short, and a prompter that
+    /// scrolls backwards on its own is worse than one that waits.
+    func advance(deltaTime: TimeInterval, lookaheadCap: Double) {
+        guard deltaTime > 0 else { return }
+        let ceiling = lastTruth + lookaheadCap
+        guard cursor < ceiling else { return }
+        cursor = min(cursor + rate * deltaTime, ceiling)
+    }
+
+    /// Fold in one alignment result.
+    ///
+    /// Position is trusted at any confidence: `SlidingWindowAlignmentEngine`
+    /// returns its last known-good position rather than a guess when its own
+    /// score is low, so even a weak result carries a real one. Only the *rate*
+    /// sample is gated, because a confident-looking gap between two weak
+    /// results is a fiction.
+    ///
+    /// That first sentence was only three-quarters true when this was written,
+    /// and the missing quarter was a real bug. The alignment engine held its
+    /// last known-good *sentence* but reported the token index inside it as 0,
+    /// which is the sentence's start. Since `truth` interpolates across the
+    /// sentence from that index, one noisy result pulled the cursor a quarter
+    /// of the way back towards the start of the line the reader was still
+    /// reading, and pulled `lastTruth` back with it so the lookahead ceiling
+    /// dropped and dead reckoning could not recover. Fixed at the source: the
+    /// engine now remembers the offset it last earned. Anything that goes back
+    /// to fabricating an in-sentence index will make this method walk the
+    /// cursor backwards again.
+    ///
+    /// `time` carries a contract the caller has to keep: it must increase
+    /// monotonically along one continuous timeline, and `reset` — the only
+    /// thing that clears `lastTruthTime` — must be called at the start of each
+    /// take. A rate sample is only taken when `time > lastTruthTime`, so a
+    /// caller that restarts its timeline at zero without resetting silently
+    /// stops measuring the reader and coasts on the seeded rate for the rest
+    /// of the take. `TeleprompterEngine` satisfies both: it passes
+    /// `updatedAt.timeIntervalSinceReferenceDate`, an absolute timeline that
+    /// does not restart, and its `load` builds a fresh pacer and resets it.
+    func correct(
+        to truth: Double,
+        confidence: Double,
+        at time: TimeInterval,
+        seekThreshold: Double
+    ) {
+        if confidence >= minimumRateConfidence,
+           let previousTime = lastTruthTime,
+           time > previousTime {
+            let sample = (truth - lastTruth) / (time - previousTime)
+            // Negative samples are the normal aftermath of a backward seek:
+            // the result right after a reader goes back to re-read a line
+            // measures as a negative speed. Blending that in would drag the
+            // estimated rate towards its floor and leave the prompter crawling
+            // for the rest of the take, so a reader who re-reads one line is
+            // exactly who this guard protects.
+            if sample > 0 {
+                let blended = rate * (1 - rateSmoothing) + sample * rateSmoothing
+                rate = min(max(blended, language.rateBounds.lowerBound), language.rateBounds.upperBound)
+            }
+        }
+
+        lastTruth = truth
+        lastTruthTime = time
+
+        let error = truth - cursor
+        if abs(error) > seekThreshold {
+            // Not drift: the reader jumped. Land on the truth — the view's
+            // 0.3s ease makes it a fast slide, not a teleport.
+            cursor = truth
+        } else {
+            cursor += error * correctionGain
+        }
+    }
+}

@@ -22,6 +22,15 @@ struct RecordingView: View {
         static let statusRowTop: CGFloat = 16
         static let teleprompterTop: CGFloat = 60
         static let teleprompterLeading: CGFloat = 20
+        /// Not a competing padding — subtracted from the space the Width
+        /// slider's fraction is taken *of*, alongside the leading inset. The
+        /// fraction still governs the column on its own; this only says how
+        /// much room there is to take a fraction of.
+        ///
+        /// It exists because Width = 1.0 otherwise puts the block's right edge
+        /// exactly on the screen's, which on a rounded display is under the
+        /// corner curvature and reads as broken next to a 20pt left inset.
+        /// 12 is the figure the pre-branch layout used, when it was a padding.
         static let teleprompterTrailing: CGFloat = 12
         static let exposureSliderBottom: CGFloat = 210
         static let paramsRowBottom: CGFloat = 162
@@ -31,7 +40,10 @@ struct RecordingView: View {
         /// HUD: that row is placed to flank the Dynamic Island, which swallows
         /// anything spanning the middle of it.
         static let archiveStatusBottom: CGFloat = 245
-        static let topScrimHeight: CGFloat = 300
+        /// 330, not 300: at the 28pt type-size ceiling a six-row Latin window
+        /// reaches 312pt from the top, and the rows past the gradient's end
+        /// lose their backing and sit straight on the picture.
+        static let topScrimHeight: CGFloat = 330
         static let bottomScrimHeight: CGFloat = 270
     }
 
@@ -138,18 +150,57 @@ struct RecordingView: View {
             .padding(.horizontal, 18)
             .topAnchored(Offset.statusRowTop)
 
+            // The engine, not values read off it. `@Observable` registers a
+            // dependency against whichever body performed the read, so reading
+            // `inLineProgress` and `readingProgress` here made two 30Hz
+            // properties invalidate all of this body — and with it the overlay,
+            // which carries closures and so cannot be equated away, and with
+            // that the whole-script ForEach inside it. Measured: 10 changes to
+            // `inLineProgress` produced 10 runs of this body and 10 of the
+            // overlay's. The engine splits those two out from `displayState`
+            // precisely so they invalidate only the fill and the rail; passing
+            // pre-read values handed that split straight back.
+            //
+            // `teleprompterEngine` and `sessionManager` are both `let`, which
+            // `@Observable` does not track, so naming them here costs nothing.
             TeleprompterOverlayView(
-                state: viewModel.sessionManager.teleprompterEngine.displayState,
+                engine: viewModel.sessionManager.teleprompterEngine,
                 textSize: viewModel.teleprompterSettings.textSize,
                 micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
                 cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
-                onTap: { viewModel.openTeleprompterAdjust() }
+                onTap: { viewModel.openTeleprompterAdjust() },
+                onLayoutChange: { width, measurer in
+                    viewModel.sessionManager.teleprompterEngine.setLayout(width: width, measurer: measurer)
+                }
             )
+            // The Width slider had never been wired to anything: this is the
+            // first thing that reads textWidthFraction. It has to be applied
+            // here rather than inside the overlay, because the fraction is of
+            // the screen, and it is what decides where lines break.
+            //
+            // The fraction is of the space that is *left* once both insets are
+            // taken out, not of the whole screen. Taking it of the whole screen
+            // and then adding a leading padding makes the padded block
+            // `width × fraction + 20` wide, which at Width = 1.0 is wider than
+            // the screen — and an oversized child is centred by the anchor
+            // below whatever its alignment says, so the block hung 10pt off
+            // *both* edges. Subtracting first keeps the fraction as the single
+            // master of the column's width while making the left inset exactly
+            // 20 at every slider position.
+            .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+                (width - Offset.teleprompterLeading - Offset.teleprompterTrailing)
+                    * viewModel.teleprompterSettings.textWidthFraction
+            }
             .opacity(viewModel.teleprompterSettings.opacity)
             .offset(y: viewModel.teleprompterSettings.verticalOffset)
             .padding(.leading, Offset.teleprompterLeading)
-            .padding(.trailing, Offset.teleprompterTrailing)
-            .topAnchored(Offset.teleprompterTop)
+            // `.topLeading`, not the default `.top`: `.top`'s horizontal
+            // component is `.center`, which was a no-op while the overlay
+            // filled the offered width and started sliding the whole block
+            // sideways the moment containerRelativeFrame made it narrower.
+            // Measured in a 393pt container, the default fraction put the left
+            // edge at 37.51 instead of 20, and dragging the slider moved it.
+            .topAnchored(Offset.teleprompterTop, alignment: .topLeading)
         }
     }
 
@@ -250,8 +301,16 @@ private extension View {
     }
 
     /// The `top:Npx` counterpart.
-    func topAnchored(_ inset: CGFloat) -> some View {
-        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    ///
+    /// `alignment` defaults to `.top` — whose *horizontal* component is
+    /// `.center` — because that is what both callers wanted while both filled
+    /// the offered width. Anything narrower than the container has to say
+    /// `.topLeading` explicitly or it drifts to the middle. Left as a
+    /// parameter rather than a changed default so `TopHUDView`, which still
+    /// fills its width via an `HStack` with a `Spacer`, keeps the behaviour it
+    /// was written against.
+    func topAnchored(_ inset: CGFloat, alignment: Alignment = .top) -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
             .padding(.top, inset)
     }
 }
