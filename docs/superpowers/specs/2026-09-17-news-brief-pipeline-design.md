@@ -249,17 +249,19 @@ README 现在写的是「Web 是主要的 Script Management Console，iOS 只负
 "审稿"是句子粒度的接受/删除/微调，不是一个文本编辑器。这条线能守住：
 iOS 上永远不会出现一个空白的多行输入框。
 
-五个界面，mock 已定稿：https://claude.ai/artifact/X3Jiga6RWyGyEhkstrPBEn
+七个界面，mock 已定稿：https://claude.ai/artifact/X3Jiga6RWyGyEhkstrPBEn
 （① ② ③ ④ 可交互：档位切换、拨盘拖拽、左滑操作、屏间跳转）
 
-1. **① 交给我**——`打字 / 说给我听` 两档。打字档是一个输入框（链接与文本合一），
+1. **① 相机（根）**——已有界面。右下角那格随 `hasScript` 变
+2. **② 当前稿件详情**——即下面的"审稿"，同一个 View
+3. **③ 交给我**——`打字 / 说给我听` 两档。打字档是一个输入框（链接与文本合一），
    剪贴板检测是输入框上方的快捷条、未授权则整条不出现；`上传截图` 与 `分享进来`
    并列在下方——它俩是一类：东西在别处
-2. **② 确认**——新闻收成一行标签，拨盘是主角（§2.2）
-3. **③ 等待**——顶部 1/3 是 token 表，下方九个阶段带**计数**而非耗时
+4. **④ 确认**——新闻收成一行标签，拨盘是主角（§2.2）
+5. **⑤ 等待**——顶部 1/3 是 token 表，下方九个阶段带**计数**而非耗时
    （14 篇 · 86 条 · 23 点）——计数告诉用户挖到了什么，那才是他愿意等下去的理由
-4. **④ 审稿**——逐句呈现，左滑露出操作
-5. **⑤ 不建议播**——§5.1 的可见形态
+6. **⑥ 不建议播**——§5.1 的可见形态
+7. **⑦ 换一篇**——历史稿件，次要路径
 
 ### 8.1 句子级操作按类型分化
 
@@ -352,15 +354,45 @@ func confirmBrief(id: UUID, edits: [SentenceEdit]) async throws -> Script
 这也意味着**新用户的第一篇稿必然用语种默认值**——差异化要等几次录制之后才生效。
 产品文案不能上来就说"按你的语速"。
 
-#### ② 审稿页在现有导航里没有位置
+#### ② 根视图要倒过来，相机不能再"属于某一篇稿"
 
-`ScriptListView` 现在是 `List → NavigationLink → RecordingView`
-（`Features/ScriptList/ScriptListView.swift:30`），中间什么都没有。Brief 在跑的时候
-还不是 Script，`viewModel.scripts` 装不下它。
+原文写的是"审稿插在列表和 RecordingView 之间"。**这句作废了**——那还是把脚本列表
+当主干的思路，与 README 第一句「Camera first」相反。
 
-- 列表数据源变成 **Brief + Script 的合并流**
-- 审稿插在列表和 RecordingView 之间；`开拍` 落成 Script 后 push 现有的
-  `RecordingView(script:syncService:takeArchiver:)`——**这一段是通的，RecordingView 不用改**
+新结构：
+
+```
+① 相机（根）──有稿──→ ② 当前稿件详情 ──开拍──┐
+     │                                          │
+     └──无稿──→ ③ 交给我 → ④ 确认 → ⑤ 等待 ────┘
+                                          落回 ②
+```
+
+- 相机右下角那格**随状态变**：有稿 → 当前稿；无稿 → 直接去「交给我」
+- **审稿页就是稿件详情页**，一个 View 两个入口（相机进 / 调研完成落回）。
+  原先画成两屏是按"新建流程"和"管理流程"分的，那是后台系统的思路
+- `ScriptListView` 降级为「换一篇」，只从详情页进，**不在主路径上**——
+  低频的东西不该挡高频的路
+
+代码上要动三处，一处比一处深：
+
+1. **`App/RootView.swift:9` 挂的是 `ScriptListView`**，改挂 `RecordingView`。
+2. **`RecordingView.script` 是 `let script: Script`**（`Features/Recording/RecordingView.swift:14`），
+   不可选、构造时注入。相机作为根视图必须能在"没有稿"时运行，这个字段要变成
+   `Script?`，提词块整块随之隐藏。
+3. **最麻烦的一处：`SessionManager` 在 `RecordingView.init` 里按 script 造出来**
+   （`RecordingView.swift:50`）。也就是说**相机会话的生命周期现在绑在某一篇稿上**——
+   换一篇稿等于重建整个 `SessionManager`，`CameraEngine` 跟着重建，用户会看到取景器
+   黑一下重启。
+   引擎层其实**已经支持**换稿（`SessionManager.prepare(script:)` 内部就是
+   `teleprompterEngine.load` + `alignmentEngine.reset`），**错的是构造时机，不是能力**。
+   要把 `SessionManager` 提到 `RecordingView` 之上（由 `AppEnvironment` 或一个相机场景
+   对象持有），`RecordingView` 只订阅它。
+
+顺带两条：
+
+- 「换一篇」的数据源是 **Brief + Script 的合并流**——Brief 在跑的时候还不是 Script，
+  `viewModel.scripts` 装不下它
 - 空状态文案 `"Write a script on the Pollux One web console, then pull to refresh."`
   在 iOS 优先之后是错的
 
@@ -461,8 +493,12 @@ Claude 原生 `web_search` 时，只是把 ② 阶段整个换掉，③–⑨ �
 跑完输出 Script + 证据层的 JSON。这一段做完就能回答唯一重要的问题——
 **稿子到底好不好、信源到底挂得准不准**。好不了的话，界面做得再顺也没用。
 
-**第二段：iOS 五个界面 + Share Extension。** 建立在已验证的管线上，mock 已定稿，
-不需要再做设计探索。
+**第二段：iOS 七个界面 + Share Extension。** 建立在已验证的管线上，mock 已定稿
+（https://claude.ai/artifact/X3Jiga6RWyGyEhkstrPBEn），不需要再做设计探索。
+
+这一段的第一件事不是画界面，是 §9.2 ② 的第 3 条：**把 `SessionManager` 从
+`RecordingView.init` 里提出来**。相机不能再属于某一篇稿，否则换稿就闪一下——
+这个结构不先理顺，后面每一屏都会被它拖着。
 
 先做第一段，用真实新闻跑一批样本，**在 `1:00 通俗` 和 `3:00 偏专业` 两个锚点上
 各评一遍稿件质量**（§11 的最后一行），再决定要不要投第二段。
