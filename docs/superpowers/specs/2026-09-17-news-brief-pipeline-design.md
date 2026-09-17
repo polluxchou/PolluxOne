@@ -118,7 +118,10 @@ Pollux One 有一件别人做不到的事：**出稿之后不断档**。稿子�
 
 **Script 是已有类型，不改。** 管线的终点就是往 `scripts` / `script_sections` /
 `paragraphs` / `sentences` 写入一条正常的 Script。证据层挂在旁边
-（`script_evidence`），提词器完全不需要知道它存在。这样录制侧零改动。
+（`script_evidence`），提词器完全不需要知道它存在。
+
+**但"录制侧零改动"是不成立的**——这条曾经写在这里，查过代码之后收回。
+五处接缝见 §9.2。
 
 ### 4.2 阶段状态机（而不是一个长任务）
 
@@ -215,9 +218,10 @@ iOS 展示一页结论：查到了什么、为什么不够、冲突在哪。
 
 ## 7 · 时长与气口（用你独有的数据）
 
-秒数不靠模型估，靠 `ScriptAlignmentEngine` 已经积累的**该用户真实语速**。
-现有的 `ReadingProgress` 上报链路（`BackendClient.reportReadingProgress`）
-已经在产生这个数据，只是还没有人用。
+秒数不靠模型估，靠**该用户真实语速**。
+
+⚠️ **原文在这里写错了一句**：说 `ReadingProgress` 上报链路"已经在产生这个数据，
+只是还没有人用"。**没有。** 详见 §9.2 ①——这份数据目前根本不存在，要新建。
 
 - 有历史数据：取该用户**近 10 次**录制的中位 charsPerSecond（中位而非均值——一次结巴的 take 不该拖慢全局）
 - 新用户：按语种默认值（`ScriptLanguage` 已有中英分流）
@@ -327,6 +331,65 @@ func confirmBrief(id: UUID, edits: [SentenceEdit]) async throws -> Script
 `MockBackendClient` 同步实现一个带假阶段推进的版本，让整条 UI 在没有后端时
 也能跑通——与现有 V1 的做法一致。
 
+### 9.2 与现有录制闭环的接缝
+
+§4.1 原本断言"录制侧零改动"。查过代码之后：**提词器确实不用改，但有五处接缝。**
+
+#### ① 语速数据不存在，必须新建
+
+`ReadingPacer.rate`（`ios/Pollux One/Engines/ReadingPacer.swift:31`）确实是字符/秒，
+但它是**会话内状态**，`reset()` 就没了。而 `script_reading_progress` 和
+`reading_sessions` 两张表只有 `completed_sentences` / `total_sentences` /
+`fraction_complete`——**没有任何速率字段**。
+
+所以"按你的语速"这条差异化**目前没有数据支撑**。第一段实现要补：
+
+- take 结束时导出 `ReadingPacer.rate`，带语种和置信度（`minimumRateConfidence = 0.5`，
+  低于门槛的 take 不计入）
+- 新建 `user_reading_rates`（`user_id · language · chars_per_second · sample_count · updated_at`），
+  §7 说的"近 10 次中位"从这里取
+
+这也意味着**新用户的第一篇稿必然用语种默认值**——差异化要等几次录制之后才生效。
+产品文案不能上来就说"按你的语速"。
+
+#### ② 审稿页在现有导航里没有位置
+
+`ScriptListView` 现在是 `List → NavigationLink → RecordingView`
+（`Features/ScriptList/ScriptListView.swift:30`），中间什么都没有。Brief 在跑的时候
+还不是 Script，`viewModel.scripts` 装不下它。
+
+- 列表数据源变成 **Brief + Script 的合并流**
+- 审稿插在列表和 RecordingView 之间；`开拍` 落成 Script 后 push 现有的
+  `RecordingView(script:syncService:takeArchiver:)`——**这一段是通的，RecordingView 不用改**
+- 空状态文案 `"Write a script on the Pollux One web console, then pull to refresh."`
+  在 iOS 优先之后是错的
+
+#### ③ Safe Word 会让信源对不上（最危险的一处）
+
+录制中 Safe Word 改段落走 `SessionManager.applyParagraphReplacement` →
+`BackendClient.updateParagraph`。句子文本变了，但 `script_evidence` 还指着那个
+`sentence_id`——**信源凭空挂到了一句用户临场改过的话上**。这恰好摧毁"每句可溯源"
+的承诺，而且是在最不容易被发现的地方。
+
+处理：`script_evidence` 带上写入时的**句子文本指纹**。文本一变，该句降级为
+"已改动 · 无信源"，而不是继续显示旧信源。审稿时删句同样要清理孤儿 evidence。
+
+#### ④ 文本拼接必须走 `PromptScriptText`
+
+`Paragraph.fullText` 用 `" "` 连接（中文会多一个半角空格），`Token.tokenize` 按空格切。
+teleprompter spec 已写明"这次不改它"，并警告过**两边各拼一次会让字偏移永久性偏移且随
+脚本长度累积**。
+
+管线落库的只是句子文本，**排版口径仍由 `PromptScriptText` 唯一持有**，管线不得自己拼一遍。
+
+#### ⑤ 气口标记放哪：一个必须承认的矛盾
+
+`Sentence` 是 `id/order/text/tokens`，`sentences` 表是 `id/paragraph_id/sort_order/text`。
+"Script 不加字段"和 §7 的"气口落在 Sentence 的元数据上"**不能同时成立**。
+
+决定：另建 `sentence_prosody`（`sentence_id · breath_after · emphasis_spans`），
+和 `script_evidence` 一样挂在旁边。提词器要用时才读，不用时 Script 仍然是干净的。
+
 ## 10 · 成本与计费
 
 ### 10.1 token 是一等产品对象
@@ -403,6 +466,9 @@ Claude 原生 `web_search` 时，只是把 ② 阶段整个换掉，③–⑨ �
 
 先做第一段，用真实新闻跑一批样本，**在 `1:00 通俗` 和 `3:00 偏专业` 两个锚点上
 各评一遍稿件质量**（§11 的最后一行），再决定要不要投第二段。
+
+§9.2 ① 的 `user_reading_rates` 也要在第一段做——它在 iOS 侧采集，但没有它
+§7 的时长估算只能退回语种默认值，两个锚点的稿件质量就评不准。
 
 第一段里 §10.1 的 `estimateBrief` 必须一起做——它是纯函数，但它的系数只能从
 真实样本的实际消耗里回归出来，而那批样本正好是第一段产出的。
