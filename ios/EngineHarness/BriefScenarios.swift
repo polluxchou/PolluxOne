@@ -223,5 +223,30 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     report.check(!AnchorRuns(noAnchors).isDegraded, "没有锚点不算降级")
     report.check(AnchorRuns(noAnchors).segments.count == 1, "整句一段")
 
+    report.section("左滑按类型分化")
+    let factActions = SwipeActions(for: .fact)
+    report.check(factActions.buttons == [.recheck, .delete], "事实句露两个")
+    report.check(factActions.width == 144, "两个按钮共 144pt", detail: "\(factActions.width)")
+
+    report.check(SwipeActions(for: .opinion).buttons == [.delete],
+                 "观点句只露删除——给它重查是在骗人")
+    report.check(SwipeActions(for: .opinion).width == 72, "一个按钮 72pt")
+    report.check(SwipeActions(for: .transition).buttons == [.delete], "钩子句同样只露删除")
+
+    report.section("滑动吸附")
+    var row = SwipeState(width: 144)
+    row.drag(to: -50)
+    row.release()
+    report.check(!row.isOpen, "没过半，弹回")
+    report.check(row.offset == 0, "弹回到 0")
+
+    row.drag(to: -100)
+    row.release()
+    report.check(row.isOpen, "过半，吸附打开")
+    report.check(row.offset == -144, "停在按钮宽度上")
+
+    row.drag(to: -9999)
+    report.check(row.offset >= -144, "再怎么拉也不超过按钮宽度", detail: "\(row.offset)")
+
     return (report.pass, report.fail)
 }
