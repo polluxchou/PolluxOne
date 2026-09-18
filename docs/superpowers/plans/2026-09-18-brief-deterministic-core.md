@@ -1,0 +1,2281 @@
+# 调研管线的确定性内核 — 实施计划
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** 把 spec §3 里"刻意不用 AI"的那四个阶段（④归并 ⑤交叉验证 ⑧挂信源 ⑨时长气口）连同 §10.1 的成本估算，做成一个零网络、零模型、可离线断言的 TypeScript 包，并用一条真实新闻的固定数据跑通端到端。
+
+**Architecture:** 新建 `pipeline/` 独立包，纯函数为主，**零运行时依赖**。每个模块单一职责、数据进数据出——和 `ios/Engines/` 下每个 Engine 的分工方式一致。模型与网络层完全不在本计划内，因此全部逻辑都能用固定 fixture 断言。
+
+**Tech Stack:** TypeScript 5 / Node 20+ / vitest（唯一的测试依赖）/ tsx（跑 CLI）。运行时依赖为零。
+
+---
+
+## 为什么只做这一段
+
+spec §12 把"后端管线 + estimateBrief + user_reading_rates"打成一段。真写起来它跨三个工具链、十几个阶段，不是一个计划能交付的东西。按"每个计划自身要能产出可运行、可测试的软件"切开：
+
+- **本计划（第一段之一）**：确定性内核。给定一组已抓好的 source/fact/draft 固定数据，算出独立源分组、归并 Claim、判定 confidence、选点、逐句绑定信源、算时长与气口，输出 Script 骨架 + 证据层 JSON。**正确性是客观可断言的。**
+- **下一个计划（第一段之二）**：模型与网络层（①抓原文 ②扩展检索 ③抽事实 ⑦成稿）+ 阶段状态机 + 真实新闻端到端 + 两个锚点的稿件质量人工评估。**质量是主观评估的。**
+
+先做本计划的理由：spec §11 自己写了"前四项不需要调用任何模型"，而那四项恰好就是 §3 说的护城河所在。**护城河先焊死，再去接模型。**
+
+## 与 spec 的四处偏离（有意的，理由在此）
+
+| spec 怎么写 | 本计划怎么做 | 为什么 |
+|---|---|---|
+| §5「5-gram shingle + **MinHash**」 | 5-gram shingle + **精确 Jaccard** | MinHash 是为规模准备的。12–30 个源的量级下，精确 Jaccard 更短、更快、而且**精确**——护城河上的算术不该引入近似误差。源数真涨到几百再换。 |
+| §4.3 ④「**embedding 聚类** + 规则」 | 数字签名 + 字符 2-gram Jaccard | embedding 要调接口，一调就破了 §11「不调模型即可离线测试」那条收益。而 §11 才是本计划的立足点。embedding 作为后续升级记录在案。 |
+| §5「冲突检测交给 `deepseek-flash` 做二分类」 | 先做**确定性的数字冲突**，语义冲突留给下一个计划 | §5.1 自己举的例子就是「路透 23 亿 vs 彭博 31 亿」——**最危险的冲突是数字冲突，而它根本不需要模型**。文本相似但数字不同即冲突，一条规则、可断言。 |
+| §12「`user_reading_rates` 也在第一段」 | 本计划只建**表**；iOS 侧采集拆成独立计划 | 采集在 Swift 侧、改 `SessionManager` 的 take 结束路径，与本包无关。本包把 `charsPerSecond` 当**注入参数**，缺省回落语种默认值——不阻塞任何事。 |
+
+---
+
+## 文件结构
+
+```
+pipeline/
+  package.json                 零运行时依赖；devDeps: typescript vitest tsx
+  tsconfig.json
+  src/
+    domain/
+      types.ts                 Source · Fact · Claim · DraftSentence 等纯类型
+      estimate.ts              §10.1 estimateBrief（纯函数）
+      prosody.ts               ⑨ 语种判定 · 秒数 · 气口
+    dedupe/
+      shingle.ts               归一化 · 5-gram/2-gram shingle · Jaccard
+      independence.ts          ⑤ 信源分组（并查集）+ 独立源计数
+      merge.ts                 ④ Fact → Claim 归并（数字签名 + Jaccard）
+      conflict.ts              ⑤ 确定性数字冲突
+      classify.ts              ⑤ confidence 判定（strong/weak/conflicted）
+    draft/
+      select.ts                ⑥ 名额分配 + insufficient 门槛
+      bind.ts                  ⑧ 逐句挂信源 + schema 校验 + 句子指纹
+    core.ts                    组合 ④⑤⑥⑧⑨
+    cli.ts                     命令行入口
+  test/
+    fixtures/
+      reserve-cut.json         降准那条：14 源（12 篇转载）+ 86 facts + 一份 draft
+      conflicted-figures.json  §5.1 的数字冲突样本
+    *.test.ts
+backend/supabase/migrations/
+  0002_briefs.sql              §9 的新表 + §9.2 ⑤ 的 sentence_prosody + user_reading_rates
+```
+
+每个文件一个职责。`dedupe/` 下五个文件加起来不到 300 行，但它们是 §3 说的"不用 AI 的那三步"的全部实现——**值得各自成文件、各自有测试**。
+
+---
+
+### Task 1: 包脚手架
+
+**Files:**
+- Create: `pipeline/package.json`
+- Create: `pipeline/tsconfig.json`
+- Create: `pipeline/src/domain/types.ts`
+- Create: `pipeline/test/smoke.test.ts`
+- Modify: `.gitignore`
+
+- [ ] **Step 1: 建 package.json**
+
+```json
+{
+  "name": "pollux-pipeline",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "brief": "tsx src/cli.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
+```
+
+运行时依赖故意为零——和 iOS 侧「V1 无第三方 SPM 包」同一条纪律。
+
+- [ ] **Step 2: 建 tsconfig.json**
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}
+```
+
+`noUncheckedIndexedAccess` 打开是有意的：本包大量按下标取数组元素，这个开关会逼出每一处漏判。
+
+- [ ] **Step 3: 把 node_modules 加进 .gitignore**
+
+在 `.gitignore` 的 `# Web / Next.js` 段之后插入：
+
+```
+# Pipeline
+pipeline/node_modules/
+pipeline/*.tsbuildinfo
+```
+
+- [ ] **Step 4: 写一个 smoke 测试，确认 vitest 跑得起来**
+
+`pipeline/test/smoke.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+
+test("vitest runs", () => {
+  expect(1 + 1).toBe(2);
+});
+```
+
+- [ ] **Step 5: 安装并跑**
+
+```bash
+cd pipeline && npm install && npm test
+```
+
+Expected: `1 passed`
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add .gitignore pipeline/package.json pipeline/package-lock.json pipeline/tsconfig.json pipeline/test/smoke.test.ts
+git commit -m "Give the research pipeline a home with no runtime dependencies"
+```
+
+---
+
+### Task 2: 领域类型
+
+**Files:**
+- Create: `pipeline/src/domain/types.ts`
+
+- [ ] **Step 1: 写下全部纯类型**
+
+```ts
+export type SourceId = string;
+export type FactId = string;
+export type ClaimId = string;
+
+/** 一个信源。`body` 是抓到的正文；指纹不存字段，由 dedupe 现算——少一个要维护的不变量。 */
+export interface Source {
+  id: SourceId;
+  url: string;
+  publisher: string;
+  /** ISO 8601 */
+  publishedAt: string;
+  body: string;
+  /** 正文里显式写明的转载来源，如「新华社」。没有则 null。 */
+  creditedTo: string | null;
+}
+
+/** 从单个 Source 抽出的原子事实。`quote` 是逐字引文——spec §4.3 说这是后面一切的根。 */
+export interface Fact {
+  id: FactId;
+  sourceId: SourceId;
+  text: string;
+  quote: string;
+}
+
+export type Confidence = "strong" | "weak" | "conflicted";
+
+/** 归并后的事实点。`independence` 是互不相关的信源组数量，不是信源条数。 */
+export interface Claim {
+  id: ClaimId;
+  text: string;
+  factIds: FactId[];
+  independence: number;
+  confidence: Confidence;
+  conflictsWith: ClaimId[];
+}
+
+export type SentenceKind = "fact" | "opinion" | "transition";
+
+/** ⑦ 成稿的输出形状。fact 句必须带 claimIds，opinion 句不许带——§6.2。 */
+export interface DraftSentence {
+  text: string;
+  kind: SentenceKind;
+  claimIds: ClaimId[];
+}
+```
+
+- [ ] **Step 2: typecheck**
+
+```bash
+cd pipeline && npm run typecheck
+```
+
+Expected: 无输出（成功）
+
+- [ ] **Step 3: 提交**
+
+```bash
+git add pipeline/src/domain/types.ts
+git commit -m "Name the things the pipeline passes around"
+```
+
+---
+
+### Task 3: 文本指纹
+
+**Files:**
+- Create: `pipeline/src/dedupe/shingle.ts`
+- Test: `pipeline/test/shingle.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/shingle.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import { jaccard, normalize, shingles } from "../src/dedupe/shingle.js";
+
+test("normalize strips punctuation and whitespace, keeps characters", () => {
+  expect(normalize("央行宣布：下调 0.5 个百分点。")).toBe("央行宣布下调05个百分点");
+});
+
+test("identical text has jaccard 1", () => {
+  const a = shingles("下调存款准备金率０点五个百分点", 5);
+  expect(jaccard(a, a)).toBe(1);
+});
+
+test("unrelated text has jaccard 0", () => {
+  const a = shingles("下调存款准备金率零点五个百分点", 5);
+  const b = shingles("港股通标的调整散户要注意什么", 5);
+  expect(jaccard(a, b)).toBe(0);
+});
+
+test("a repost that only changed its lede still scores high", () => {
+  const wire = "央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。";
+  const repost = "【快讯】央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。";
+  expect(jaccard(shingles(wire, 5), shingles(repost, 5))).toBeGreaterThan(0.9);
+});
+
+test("two texts with no shingles at all are treated as identical", () => {
+  expect(jaccard(shingles("abc", 5), shingles("xy", 5))).toBe(1);
+});
+```
+
+最后一条是刻意的：短于 k 的文本产不出 shingle，两个空集判为相同——调用方必须自己保证正文够长，而不是靠这个函数给出一个似是而非的分数。
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/shingle.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/dedupe/shingle.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/dedupe/shingle.ts`：
+
+```ts
+/** 5-gram 用于整篇正文比对，2-gram 用于短句比对。 */
+export const BODY_SHINGLE_K = 5;
+export const TEXT_SHINGLE_K = 2;
+
+/**
+ * 去掉空白与所有标点/符号，只留会影响语义的字符。
+ * 中文没有词边界，逐字符 shingle 比分词更稳，也不用引依赖。
+ */
+export function normalize(text: string): string {
+  return text.replace(/[\s\p{P}\p{S}]+/gu, "");
+}
+
+export function shingles(text: string, k: number): Set<string> {
+  const s = normalize(text);
+  const out = new Set<string>();
+  for (let i = 0; i + k <= s.length; i++) out.add(s.slice(i, i + k));
+  return out;
+}
+
+/** 空集与空集判为相同：短于 k 的文本本函数无法比较，由调用方负责。 */
+export function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 && b.size === 0) return 1;
+  let shared = 0;
+  for (const x of a) if (b.has(x)) shared += 1;
+  const union = a.size + b.size - shared;
+  return union === 0 ? 1 : shared / union;
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/shingle.test.ts
+```
+
+Expected: `5 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/dedupe/shingle.ts pipeline/test/shingle.test.ts
+git commit -m "Measure how much two pieces of text overlap"
+```
+
+---
+
+### Task 4: 独立源计数（本计划最关键的一个）
+
+spec §11 第一行：「构造『1 篇通讯社稿 + 5 篇转载』，必须判成 independence = 1。这是最关键的单测。」
+
+**Files:**
+- Create: `pipeline/src/dedupe/independence.ts`
+- Test: `pipeline/test/independence.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/independence.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import type { Source } from "../src/domain/types.js";
+import { groupSources, independenceOf } from "../src/dedupe/independence.js";
+
+const WIRE = "央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。";
+
+function src(id: string, publisher: string, body: string, creditedTo: string | null = null): Source {
+  return { id, url: `https://${publisher}.example/${id}`, publisher, publishedAt: "2026-03-01T07:00:00Z", body, creditedTo };
+}
+
+test("one wire story plus five reposts counts as a single source", () => {
+  const sources = [
+    src("s0", "xinhua", WIRE),
+    src("s1", "portal-a", `【转载】${WIRE}`),
+    src("s2", "portal-b", `${WIRE}（完）`),
+    src("s3", "portal-c", WIRE),
+    src("s4", "portal-d", `快讯｜${WIRE}`),
+    src("s5", "portal-e", WIRE),
+  ];
+  const groups = groupSources(sources);
+  expect(groups).toHaveLength(1);
+  expect(independenceOf(sources.map((s) => s.id), groups)).toBe(1);
+});
+
+test("an explicit credit line collapses a source into the one it credits", () => {
+  const sources = [
+    src("s0", "xinhua", WIRE),
+    src("s1", "portal-a", "据新华社报道，央行今日决定实施降准，市场反应积极，多位分析师认为这一决定符合预期。", "xinhua"),
+  ];
+  expect(groupSources(sources)).toHaveLength(1);
+});
+
+test("same publisher is one source even when the two pieces differ", () => {
+  const sources = [
+    src("s0", "caixin", "央行降准零点五个百分点，为年内第二次，释放资金约一万亿元。"),
+    src("s1", "caixin", "降准之后，按揭利率是否跟进下调？多位银行人士给出不同判断。"),
+  ];
+  expect(groupSources(sources)).toHaveLength(1);
+});
+
+test("a media group table collapses sibling outlets", () => {
+  const sources = [
+    src("s0", "outlet-a", "央行降准零点五个百分点，为年内第二次，释放资金约一万亿元。"),
+    src("s1", "outlet-b", "降准之后，按揭利率是否跟进下调？多位银行人士给出不同判断。"),
+  ];
+  const groups = groupSources(sources, { "outlet-a": "group-x", "outlet-b": "group-x" });
+  expect(groups).toHaveLength(1);
+});
+
+test("genuinely independent reporting stays separate", () => {
+  const sources = [
+    src("s0", "pbc", "中国人民银行决定于三月十五日下调金融机构存款准备金率零点五个百分点。"),
+    src("s1", "reuters", "Reuters 独立测算显示，此次操作对应释放的长期资金规模在一万亿元左右。"),
+    src("s2", "caixin", "财新记者从多家银行了解到，降准落地后信贷投放节奏将有所前移。"),
+  ];
+  const groups = groupSources(sources);
+  expect(groups).toHaveLength(3);
+  expect(independenceOf(["s0", "s1", "s2"], groups)).toBe(3);
+});
+
+test("independence only counts the groups a claim actually cites", () => {
+  const sources = [
+    src("s0", "pbc", "中国人民银行决定于三月十五日下调金融机构存款准备金率零点五个百分点。"),
+    src("s1", "reuters", "Reuters 独立测算显示，此次操作对应释放的长期资金规模在一万亿元左右。"),
+    src("s2", "caixin", "财新记者从多家银行了解到，降准落地后信贷投放节奏将有所前移。"),
+  ];
+  const groups = groupSources(sources);
+  expect(independenceOf(["s0", "s1"], groups)).toBe(2);
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/independence.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/dedupe/independence.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/dedupe/independence.ts`：
+
+```ts
+import type { Source, SourceId } from "../domain/types.js";
+import { BODY_SHINGLE_K, jaccard, shingles } from "./shingle.js";
+
+/** 正文相似度到这个值就判为同一份稿。用真实转载样本调过再改。 */
+export const SAME_SOURCE_JACCARD = 0.5;
+
+export interface SourceGroup {
+  sourceIds: SourceId[];
+}
+
+/**
+ * 把互相转载、互相署名、同一媒体主体的 Source 并成一组。
+ * **组数才是 independence，信源条数不是。** 同一份通讯社稿被五家门户转载，
+ * 是 1 个源不是 5 个——这个数字算错，整个「每句可溯源」的承诺就是假的。
+ *
+ * @param mediaGroups publisher → 媒体集团 key 的映射。同集团视为同一主体。
+ */
+export function groupSources(
+  sources: Source[],
+  mediaGroups: Record<string, string> = {},
+): SourceGroup[] {
+  const parent = sources.map((_, i) => i);
+
+  const find = (i: number): number => {
+    let root = i;
+    while (parent[root] !== root) root = parent[root]!;
+    let walk = i;
+    while (parent[walk] !== root) {
+      const next = parent[walk]!;
+      parent[walk] = root;
+      walk = next;
+    }
+    return root;
+  };
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+
+  const prints = sources.map((s) => shingles(s.body, BODY_SHINGLE_K));
+  const subject = (s: Source): string => mediaGroups[s.publisher] ?? s.publisher;
+
+  for (let i = 0; i < sources.length; i++) {
+    for (let j = i + 1; j < sources.length; j++) {
+      const a = sources[i]!;
+      const b = sources[j]!;
+
+      // 规则 1：正文指纹相似 —— 同一份稿的转载
+      if (jaccard(prints[i]!, prints[j]!) >= SAME_SOURCE_JACCARD) {
+        union(i, j);
+        continue;
+      }
+      // 规则 2：显式署名指向对方
+      if (a.creditedTo === b.publisher || b.creditedTo === a.publisher) {
+        union(i, j);
+        continue;
+      }
+      // 规则 3：同一媒体主体
+      if (subject(a) === subject(b)) union(i, j);
+    }
+  }
+
+  const byRoot = new Map<number, SourceId[]>();
+  for (let i = 0; i < sources.length; i++) {
+    const root = find(i);
+    const bucket = byRoot.get(root);
+    if (bucket) bucket.push(sources[i]!.id);
+    else byRoot.set(root, [sources[i]!.id]);
+  }
+  return [...byRoot.values()].map((sourceIds) => ({ sourceIds }));
+}
+
+/** 一条 Claim 引用的这些信源，落在几个互不相关的组里。 */
+export function independenceOf(cited: SourceId[], groups: SourceGroup[]): number {
+  const wanted = new Set(cited);
+  let count = 0;
+  for (const group of groups) {
+    if (group.sourceIds.some((id) => wanted.has(id))) count += 1;
+  }
+  return count;
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/independence.test.ts
+```
+
+Expected: `6 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/dedupe/independence.ts pipeline/test/independence.test.ts
+git commit -m "Count sources that are actually independent of each other"
+```
+
+---
+
+### Task 5: 归并事实点
+
+**Files:**
+- Create: `pipeline/src/dedupe/merge.ts`
+- Test: `pipeline/test/merge.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/merge.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import type { Fact } from "../src/domain/types.js";
+import { mergeFacts, numericSignature } from "../src/dedupe/merge.js";
+
+function fact(id: string, sourceId: string, text: string): Fact {
+  return { id, sourceId, text, quote: text };
+}
+
+test("numeric signature pulls out every number, sorted", () => {
+  expect(numericSignature("降准 0.5 个百分点，释放 1 万亿元，3 月 15 日生效")).toEqual(["0.5", "1", "15", "3"]);
+});
+
+test("numeric signature is empty when there are no numbers", () => {
+  expect(numericSignature("央行今天突然出手了")).toEqual([]);
+});
+
+test("the same fact worded differently by two outlets merges", () => {
+  const facts = [
+    fact("f0", "s0", "此次降准释放长期资金约 1 万亿元"),
+    fact("f1", "s1", "此次降准将释放长期资金约 1 万亿元"),
+  ];
+  const claims = mergeFacts(facts);
+  expect(claims).toHaveLength(1);
+  expect(claims[0]!.factIds).toEqual(["f0", "f1"]);
+});
+
+test("same wording but a different number does NOT merge", () => {
+  const facts = [
+    fact("f0", "s0", "涉及金额约 23 亿美元"),
+    fact("f1", "s1", "涉及金额约 31 亿美元"),
+  ];
+  expect(mergeFacts(facts)).toHaveLength(2);
+});
+
+test("unrelated facts stay apart", () => {
+  const facts = [
+    fact("f0", "s0", "此次降准释放长期资金约 1 万亿元"),
+    fact("f1", "s1", "港股通标的下个月调整"),
+  ];
+  expect(mergeFacts(facts)).toHaveLength(2);
+});
+
+test("number-free facts need a higher bar to merge", () => {
+  const near = [
+    fact("f0", "s0", "多位分析师认为这一决定符合市场预期"),
+    fact("f1", "s1", "多位分析师认为这一决定基本符合市场预期"),
+  ];
+  expect(mergeFacts(near)).toHaveLength(1);
+
+  const looser = [
+    fact("f2", "s0", "多位分析师认为这一决定符合市场预期"),
+    fact("f3", "s1", "分析师对后续政策走向看法不一"),
+  ];
+  expect(mergeFacts(looser)).toHaveLength(2);
+});
+
+test("a merged claim keeps the longest wording", () => {
+  const facts = [
+    fact("f0", "s0", "降准释放资金约 1 万亿元"),
+    fact("f1", "s1", "此次降准将释放长期资金约 1 万亿元"),
+  ];
+  expect(mergeFacts(facts)[0]!.text).toBe("此次降准将释放长期资金约 1 万亿元");
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/merge.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/dedupe/merge.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/dedupe/merge.ts`：
+
+```ts
+import type { Claim, Fact } from "../domain/types.js";
+import { jaccard, shingles, TEXT_SHINGLE_K } from "./shingle.js";
+
+/** 数字一致时，文本相似到这个值就算同一件事。 */
+export const MERGE_JACCARD = 0.45;
+/** 两边都没有数字时，门槛抬高——没有数字可对，只能更信文本。 */
+export const MERGE_JACCARD_NO_NUMBERS = 0.7;
+
+/**
+ * 一句话里的全部数字，排序后作为签名。
+ * 数字是口播稿里最容易翻车的东西：**数字不一致，绝不归并**。
+ * 单位暂不解析（「23 亿美元」只取 23）——单位差异留给下一个计划的语义冲突检测。
+ */
+export function numericSignature(text: string): string[] {
+  const found = text.match(/\d+(?:\.\d+)?/g) ?? [];
+  return [...found].sort();
+}
+
+function sameNumbers(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * ④ 归并：说同一件事的 Fact 合成一个 Claim。
+ * 出来的 Claim 还没有 independence 和 confidence——那是 ⑤ 的事。
+ */
+export function mergeFacts(facts: Fact[]): Claim[] {
+  const parent = facts.map((_, i) => i);
+  const find = (i: number): number => {
+    let root = i;
+    while (parent[root] !== root) root = parent[root]!;
+    return root;
+  };
+  const union = (a: number, b: number): void => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent[rb] = ra;
+  };
+
+  const prints = facts.map((f) => shingles(f.text, TEXT_SHINGLE_K));
+  const numbers = facts.map((f) => numericSignature(f.text));
+
+  for (let i = 0; i < facts.length; i++) {
+    for (let j = i + 1; j < facts.length; j++) {
+      const na = numbers[i]!;
+      const nb = numbers[j]!;
+      if (!sameNumbers(na, nb)) continue;
+
+      const bar = na.length === 0 ? MERGE_JACCARD_NO_NUMBERS : MERGE_JACCARD;
+      if (jaccard(prints[i]!, prints[j]!) >= bar) union(i, j);
+    }
+  }
+
+  const byRoot = new Map<number, number[]>();
+  for (let i = 0; i < facts.length; i++) {
+    const root = find(i);
+    const bucket = byRoot.get(root);
+    if (bucket) bucket.push(i);
+    else byRoot.set(root, [i]);
+  }
+
+  return [...byRoot.values()].map((indices, n) => {
+    // 最长的措辞信息量最大，用它当 Claim 的表述
+    const longest = indices.reduce((best, i) =>
+      facts[i]!.text.length > facts[best]!.text.length ? i : best, indices[0]!);
+    return {
+      id: `c${n}`,
+      text: facts[longest]!.text,
+      factIds: indices.map((i) => facts[i]!.id),
+      independence: 0,
+      confidence: "weak",
+      conflictsWith: [],
+    } satisfies Claim;
+  });
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/merge.test.ts
+```
+
+Expected: `7 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/dedupe/merge.ts pipeline/test/merge.test.ts
+git commit -m "Fold facts that say the same thing into one claim"
+```
+
+---
+
+### Task 6: 数字冲突
+
+spec §5.1 举的例子就是这个：路透 23 亿 vs 彭博 31 亿。**最危险的冲突是数字冲突，而它不需要模型。**
+
+**Files:**
+- Create: `pipeline/src/dedupe/conflict.ts`
+- Test: `pipeline/test/conflict.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/conflict.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import type { Claim } from "../src/domain/types.js";
+import { findNumericConflicts } from "../src/dedupe/conflict.js";
+
+function claim(id: string, text: string): Claim {
+  return { id, text, factIds: [], independence: 1, confidence: "weak", conflictsWith: [] };
+}
+
+test("same claim, different figure — the Reuters vs Bloomberg case", () => {
+  const claims = [
+    claim("c0", "此次交易涉及金额约 23 亿美元"),
+    claim("c1", "此次交易涉及金额约 31 亿美元"),
+  ];
+  expect(findNumericConflicts(claims)).toEqual([["c0", "c1"]]);
+});
+
+test("agreeing figures are not a conflict", () => {
+  const claims = [
+    claim("c0", "此次交易涉及金额约 23 亿美元"),
+    claim("c1", "该笔交易涉及金额约 23 亿美元"),
+  ];
+  expect(findNumericConflicts(claims)).toEqual([]);
+});
+
+test("different claims that happen to carry different numbers are not a conflict", () => {
+  const claims = [
+    claim("c0", "此次降准释放长期资金约 1 万亿元"),
+    claim("c1", "港股通标的下个月新增 12 只"),
+  ];
+  expect(findNumericConflicts(claims)).toEqual([]);
+});
+
+test("a claim with no numbers cannot conflict numerically", () => {
+  const claims = [
+    claim("c0", "多位分析师认为这一决定符合市场预期"),
+    claim("c1", "多位分析师认为这一决定不符合市场预期"),
+  ];
+  expect(findNumericConflicts(claims)).toEqual([]);
+});
+```
+
+最后一条记录了本计划的边界：那两句是**真冲突**，但它是语义冲突，不是数字冲突。检出它需要模型，属于下一个计划。测试写出来是为了让这个洞**可见**，不是为了掩盖它。
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/conflict.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/dedupe/conflict.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/dedupe/conflict.ts`：
+
+```ts
+import type { Claim, ClaimId } from "../domain/types.js";
+import { MERGE_JACCARD, numericSignature } from "./merge.js";
+import { jaccard, shingles, TEXT_SHINGLE_K } from "./shingle.js";
+
+/**
+ * ⑤ 的确定性一半：文本讲的是同一件事，但数字对不上。
+ *
+ * 归并（④）要求数字一致才合并，所以这些 Claim 必然是分开的两条；
+ * 它们的文本相似度却很高——这正是「两家都在说这件事，但数不一样」。
+ *
+ * 语义冲突（同一件事、说法相反、没有数字）检不出来，那需要模型，见下一个计划。
+ */
+export function findNumericConflicts(claims: Claim[]): [ClaimId, ClaimId][] {
+  const prints = claims.map((c) => shingles(c.text, TEXT_SHINGLE_K));
+  const numbers = claims.map((c) => numericSignature(c.text));
+  const pairs: [ClaimId, ClaimId][] = [];
+
+  for (let i = 0; i < claims.length; i++) {
+    for (let j = i + 1; j < claims.length; j++) {
+      const na = numbers[i]!;
+      const nb = numbers[j]!;
+      if (na.length === 0 || nb.length === 0) continue;
+      if (na.length === nb.length && na.every((v, k) => v === nb[k])) continue;
+      if (jaccard(prints[i]!, prints[j]!) >= MERGE_JACCARD) {
+        pairs.push([claims[i]!.id, claims[j]!.id]);
+      }
+    }
+  }
+  return pairs;
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/conflict.test.ts
+```
+
+Expected: `4 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/dedupe/conflict.ts pipeline/test/conflict.test.ts
+git commit -m "Catch the two outlets that disagree about a number"
+```
+
+---
+
+### Task 7: confidence 判定
+
+**Files:**
+- Create: `pipeline/src/dedupe/classify.ts`
+- Test: `pipeline/test/classify.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/classify.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import type { Claim, Fact, Source } from "../src/domain/types.js";
+import { classifyClaims, STRONG_INDEPENDENCE } from "../src/dedupe/classify.js";
+
+const BODIES: Record<string, string> = {
+  pbc: "中国人民银行决定于三月十五日下调金融机构存款准备金率零点五个百分点。",
+  reuters: "Reuters 独立测算显示，此次操作对应释放的长期资金规模在一万亿元左右。",
+  caixin: "财新记者从多家银行了解到，降准落地后信贷投放节奏将有所前移。",
+};
+
+function src(id: string, publisher: string): Source {
+  return { id, url: `https://${publisher}.example/${id}`, publisher, publishedAt: "2026-03-01T07:00:00Z", body: BODIES[publisher]!, creditedTo: null };
+}
+function fact(id: string, sourceId: string): Fact {
+  return { id, sourceId, text: "t", quote: "t" };
+}
+function claim(id: string, factIds: string[]): Claim {
+  return { id, text: "涉及金额约 23 亿美元", factIds, independence: 0, confidence: "weak", conflictsWith: [] };
+}
+
+test("three independent groups make a claim strong", () => {
+  const sources = [src("s0", "pbc"), src("s1", "reuters"), src("s2", "caixin")];
+  const facts = [fact("f0", "s0"), fact("f1", "s1"), fact("f2", "s2")];
+  const [out] = classifyClaims([claim("c0", ["f0", "f1", "f2"])], facts, sources);
+  expect(out!.independence).toBe(STRONG_INDEPENDENCE);
+  expect(out!.confidence).toBe("strong");
+});
+
+test("a single source makes a claim weak, however many reposts back it", () => {
+  const sources = [src("s0", "pbc"), src("s1", "pbc")];
+  const facts = [fact("f0", "s0"), fact("f1", "s1")];
+  const [out] = classifyClaims([claim("c0", ["f0", "f1"])], facts, sources);
+  expect(out!.independence).toBe(1);
+  expect(out!.confidence).toBe("weak");
+});
+
+test("a numeric conflict overrides independence entirely", () => {
+  const sources = [src("s0", "pbc"), src("s1", "reuters"), src("s2", "caixin")];
+  const facts = [fact("f0", "s0"), fact("f1", "s1"), fact("f2", "s2")];
+  const claims: Claim[] = [
+    { ...claim("c0", ["f0", "f1", "f2"]), text: "涉及金额约 23 亿美元" },
+    { ...claim("c1", ["f0", "f1", "f2"]), text: "涉及金额约 31 亿美元" },
+  ];
+  const out = classifyClaims(claims, facts, sources);
+  expect(out.map((c) => c.confidence)).toEqual(["conflicted", "conflicted"]);
+  expect(out[0]!.conflictsWith).toEqual(["c1"]);
+  expect(out[1]!.conflictsWith).toEqual(["c0"]);
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/classify.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/dedupe/classify.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/dedupe/classify.ts`：
+
+```ts
+import type { Claim, ClaimId, Fact, Source } from "../domain/types.js";
+import { findNumericConflicts } from "./conflict.js";
+import { groupSources, independenceOf } from "./independence.js";
+
+/** 到这个独立源组数才算「敢播」。spec §5 定的。 */
+export const STRONG_INDEPENDENCE = 3;
+
+/**
+ * ⑤ 交叉验证：给每条 Claim 填上 independence 与 confidence。
+ * 冲突优先级最高——三个独立源都说的话，只要和另一条数字打架，照样不进稿。
+ */
+export function classifyClaims(
+  claims: Claim[],
+  facts: Fact[],
+  sources: Source[],
+  mediaGroups: Record<string, string> = {},
+): Claim[] {
+  const groups = groupSources(sources, mediaGroups);
+  const sourceOfFact = new Map(facts.map((f) => [f.id, f.sourceId]));
+
+  const conflicts = new Map<ClaimId, ClaimId[]>();
+  for (const [a, b] of findNumericConflicts(claims)) {
+    conflicts.set(a, [...(conflicts.get(a) ?? []), b]);
+    conflicts.set(b, [...(conflicts.get(b) ?? []), a]);
+  }
+
+  return claims.map((claim) => {
+    const cited = claim.factIds
+      .map((id) => sourceOfFact.get(id))
+      .filter((id): id is string => id !== undefined);
+    const independence = independenceOf(cited, groups);
+    const against = conflicts.get(claim.id) ?? [];
+
+    return {
+      ...claim,
+      independence,
+      conflictsWith: against,
+      confidence: against.length > 0
+        ? "conflicted"
+        : independence >= STRONG_INDEPENDENCE ? "strong" : "weak",
+    } satisfies Claim;
+  });
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/classify.test.ts
+```
+
+Expected: `3 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/dedupe/classify.ts pipeline/test/classify.test.ts
+git commit -m "Decide which claims are safe enough to say out loud"
+```
+
+---
+
+### Task 8: 成本估算
+
+**Files:**
+- Create: `pipeline/src/domain/estimate.ts`
+- Test: `pipeline/test/estimate.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/estimate.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import { DURATION_STEPS, ESTIMATE_COEFFICIENTS, estimateBrief } from "../src/domain/estimate.js";
+
+test("the dial's ten duration steps are the ones the mock shows", () => {
+  expect(DURATION_STEPS).toEqual([30, 45, 60, 90, 120, 150, 180, 240, 300, 360]);
+});
+
+test("an off-step duration snaps to the nearest step", () => {
+  expect(estimateBrief(100, 0.5).durationSec).toBe(90);
+  expect(estimateBrief(1, 0.5).durationSec).toBe(30);
+  expect(estimateBrief(9999, 0.5).durationSec).toBe(360);
+});
+
+test("register is clamped to 0..1", () => {
+  expect(estimateBrief(60, -3).register).toBe(0);
+  expect(estimateBrief(60, 7).register).toBe(1);
+});
+
+test("the 1:00 通俗 anchor", () => {
+  const e = estimateBrief(60, 0.25);
+  expect(e.tokens).toBe(68500);
+  expect(e.sources).toBe(11);
+  expect(e.factSlots).toBe(3);
+  expect(e.researchMinutes).toBe(4);
+});
+
+test("the 3:00 偏专业 anchor", () => {
+  const e = estimateBrief(180, 0.75);
+  expect(e.tokens).toBe(175500);
+  expect(e.sources).toBe(21);
+  expect(e.factSlots).toBe(7);
+  expect(e.researchMinutes).toBe(8);
+});
+
+test("both axes only ever push cost up", () => {
+  const cheap = estimateBrief(30, 0);
+  const dear = estimateBrief(360, 1);
+  expect(cheap.tokens).toBeLessThan(dear.tokens);
+  for (let i = 1; i < DURATION_STEPS.length; i++) {
+    const prev = estimateBrief(DURATION_STEPS[i - 1]!, 0.5).tokens;
+    expect(estimateBrief(DURATION_STEPS[i]!, 0.5).tokens).toBeGreaterThan(prev);
+  }
+});
+
+test("the coefficients are pinned so a change has to be deliberate", () => {
+  expect(ESTIMATE_COEFFICIENTS).toEqual({
+    tokensBase: 15000,
+    tokensPerSecond: 600,
+    tokensPerRegister: 70000,
+    sourcesBase: 6,
+    sourcesPerMinute: 3,
+    sourcesPerRegister: 8,
+    secondsPerFactSlot: 25,
+    minimumFactSlots: 3,
+    minutesBase: 2,
+    minutesPerMinute: 1.2,
+    minutesPerRegister: 2.5,
+  });
+});
+```
+
+最后一条不是在测逻辑，是在**钉住系数**。这些数字现在是从 mock 里定的，下一个计划要用真实样本回归校准；钉住之后任何调整都会亮一条失败的测试，逼人当面记下"为什么改"。
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/estimate.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/domain/estimate.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/domain/estimate.ts`：
+
+```ts
+/** ② 拨盘纵轴的十档。iOS 侧的拨盘必须用同一组值。 */
+export const DURATION_STEPS = [30, 45, 60, 90, 120, 150, 180, 240, 300, 360] as const;
+
+/**
+ * 这些系数目前来自 mock 的手调值。
+ * **下一个计划要用真实样本的实际消耗把它们回归出来**——spec §10.1 的未决问题之一：
+ * 估低了用户会觉得被骗。测试钉住当前值，改动必须是明知故犯。
+ */
+export const ESTIMATE_COEFFICIENTS = {
+  tokensBase: 15000,
+  tokensPerSecond: 600,
+  tokensPerRegister: 70000,
+  sourcesBase: 6,
+  sourcesPerMinute: 3,
+  sourcesPerRegister: 8,
+  secondsPerFactSlot: 25,
+  minimumFactSlots: 3,
+  minutesBase: 2,
+  minutesPerMinute: 1.2,
+  minutesPerRegister: 2.5,
+} as const;
+
+export interface BriefEstimate {
+  durationSec: number;
+  /** 0 = 八卦，1 = 专业 */
+  register: number;
+  sources: number;
+  factSlots: number;
+  tokens: number;
+  researchMinutes: number;
+}
+
+function snapDuration(durationSec: number): number {
+  return DURATION_STEPS.reduce((best, step) =>
+    Math.abs(step - durationSec) < Math.abs(best - durationSec) ? step : best,
+    DURATION_STEPS[0]);
+}
+
+/**
+ * §10.1：花钱之前就把账算给用户看。
+ * 纯函数，没有 IO——iOS 侧照抄同一组系数即可得到同样的数字。
+ */
+export function estimateBrief(durationSec: number, register: number): BriefEstimate {
+  const c = ESTIMATE_COEFFICIENTS;
+  const sec = snapDuration(durationSec);
+  const reg = Math.min(1, Math.max(0, register));
+
+  return {
+    durationSec: sec,
+    register: reg,
+    tokens: c.tokensBase + sec * c.tokensPerSecond + reg * c.tokensPerRegister,
+    sources: Math.round(c.sourcesBase + (sec / 60) * c.sourcesPerMinute + reg * c.sourcesPerRegister),
+    factSlots: Math.max(c.minimumFactSlots, Math.round(sec / c.secondsPerFactSlot)),
+    researchMinutes: Math.round(c.minutesBase + (sec / 60) * c.minutesPerMinute + reg * c.minutesPerRegister),
+  };
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/estimate.test.ts
+```
+
+Expected: `7 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/domain/estimate.ts pipeline/test/estimate.test.ts
+git commit -m "Work out what a brief will cost before spending anything"
+```
+
+---
+
+### Task 9: 时长与气口
+
+**Files:**
+- Create: `pipeline/src/domain/prosody.ts`
+- Test: `pipeline/test/prosody.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/prosody.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import { breathMarks, DEFAULT_CHARS_PER_SECOND, detectLanguage, estimateSeconds } from "../src/domain/prosody.js";
+
+test("language comes from the share of CJK characters", () => {
+  expect(detectLanguage("央行今天突然出手了")).toBe("cjk");
+  expect(detectLanguage("The central bank moved today")).toBe("latin");
+  expect(detectLanguage("央行 announced 降准")).toBe("cjk");
+});
+
+test("seconds come from the injected rate, not a guess", () => {
+  expect(estimateSeconds("十个字的一句话", 5)).toBeCloseTo(1.4, 5);
+  expect(estimateSeconds("十个字的一句话", 10)).toBeCloseTo(0.7, 5);
+});
+
+test("punctuation and spaces do not take time to read", () => {
+  expect(estimateSeconds("央行，出手。", 5)).toBeCloseTo(estimateSeconds("央行出手", 5), 5);
+});
+
+test("with no rate on file, the language default is used", () => {
+  expect(estimateSeconds("央行今天突然出手了", DEFAULT_CHARS_PER_SECOND.cjk)).toBeCloseTo(9 / 5.5, 5);
+});
+
+test("a sentence-final stop is a long breath, an internal comma a short one", () => {
+  expect(breathMarks(["央行今天突然出手了。", "下调准备金率，三月生效。"])).toEqual([
+    { sentenceIndex: 0, kind: "long" },
+    { sentenceIndex: 1, kind: "short", charOffset: 7 },
+    { sentenceIndex: 1, kind: "long" },
+  ]);
+});
+
+test("a sentence with no terminal punctuation still gets a long breath after it", () => {
+  expect(breathMarks(["央行今天突然出手了"])).toEqual([{ sentenceIndex: 0, kind: "long" }]);
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/prosody.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/domain/prosody.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/domain/prosody.ts`：
+
+```ts
+export type ScriptLanguage = "cjk" | "latin";
+
+/**
+ * 没有该用户历史语速时的回落值（字符/秒）。
+ * **注意：真实语速目前根本没有采集**——见 spec §9.2 ①。
+ * 所以新用户的第一篇稿必然走这两个数字，产品文案不能上来就说「按你的语速」。
+ */
+export const DEFAULT_CHARS_PER_SECOND: Record<ScriptLanguage, number> = {
+  cjk: 5.5,
+  latin: 14.5,
+};
+
+const CJK = /[㐀-䶿一-鿿぀-ヿ가-힯]/u;
+
+export function detectLanguage(text: string): ScriptLanguage {
+  let cjk = 0;
+  let letters = 0;
+  for (const ch of text) {
+    if (CJK.test(ch)) cjk += 1;
+    else if (/\p{L}/u.test(ch)) letters += 1;
+  }
+  return cjk > 0 && cjk * 4 >= letters ? "cjk" : "latin";
+}
+
+/** 只数会念出声的字符——标点和空白不占时间。 */
+function spokenLength(text: string): number {
+  return [...text.replace(/[\s\p{P}\p{S}]+/gu, "")].length;
+}
+
+export function estimateSeconds(text: string, charsPerSecond: number): number {
+  if (charsPerSecond <= 0) throw new Error("charsPerSecond must be positive");
+  return spokenLength(text) / charsPerSecond;
+}
+
+export type BreathKind = "long" | "short";
+
+export interface BreathMark {
+  sentenceIndex: number;
+  kind: BreathKind;
+  /** short 气口在句内的字符位置；long 气口在句末，不带这个字段。 */
+  charOffset?: number;
+}
+
+const INTERNAL = /[，、；：,;:]/u;
+
+/**
+ * ⑨ 气口：句末标点 = 长气口，句中顿号逗号 = 短气口。
+ * 比让模型猜准，而且确定性——同一份稿两次跑出来一模一样。
+ */
+export function breathMarks(sentences: string[]): BreathMark[] {
+  const marks: BreathMark[] = [];
+  sentences.forEach((sentence, sentenceIndex) => {
+    [...sentence].forEach((ch, charOffset) => {
+      if (INTERNAL.test(ch)) marks.push({ sentenceIndex, kind: "short", charOffset });
+    });
+    marks.push({ sentenceIndex, kind: "long" });
+  });
+  return marks;
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/prosody.test.ts
+```
+
+Expected: `6 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/domain/prosody.ts pipeline/test/prosody.test.ts
+git commit -m "Say how long a script takes and where the breaths fall"
+```
+
+---
+
+### Task 10: 选点与 insufficient 门槛
+
+**Files:**
+- Create: `pipeline/src/draft/select.ts`
+- Test: `pipeline/test/select.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/select.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import type { Claim, Confidence } from "../src/domain/types.js";
+import { selectClaims } from "../src/draft/select.js";
+
+function claim(id: string, confidence: Confidence, independence: number): Claim {
+  return { id, text: id, factIds: [], independence, confidence, conflictsWith: [] };
+}
+
+test("strong claims are picked first, most-corroborated first", () => {
+  const claims = [
+    claim("c0", "strong", 3),
+    claim("c1", "strong", 5),
+    claim("c2", "strong", 4),
+  ];
+  const out = selectClaims(claims, 3);
+  expect(out.verdict).toBe("ok");
+  expect(out.picked).toEqual(["c1", "c2", "c0"]);
+});
+
+test("weak claims fill the remaining slots once three strong are in", () => {
+  const claims = [
+    claim("c0", "strong", 3), claim("c1", "strong", 3), claim("c2", "strong", 3),
+    claim("c3", "weak", 2), claim("c4", "weak", 1),
+  ];
+  const out = selectClaims(claims, 5);
+  expect(out.picked).toEqual(["c0", "c1", "c2", "c3", "c4"]);
+});
+
+test("fewer than three strong claims means no script at all", () => {
+  const claims = [
+    claim("c0", "strong", 3), claim("c1", "strong", 3),
+    claim("c2", "weak", 1), claim("c3", "weak", 1), claim("c4", "weak", 1),
+  ];
+  const out = selectClaims(claims, 5);
+  expect(out.verdict).toBe("insufficient");
+  expect(out.picked).toEqual([]);
+  expect(out.reason).toBe("only 2 strong claims, need 3");
+});
+
+test("a long duration does not lower the bar", () => {
+  const claims = [claim("c0", "strong", 3), claim("c1", "strong", 3)];
+  expect(selectClaims(claims, 14).verdict).toBe("insufficient");
+});
+
+test("conflicted claims never enter the script but are reported", () => {
+  const claims = [
+    claim("c0", "strong", 3), claim("c1", "strong", 3), claim("c2", "strong", 3),
+    { ...claim("c3", "conflicted", 4), conflictsWith: ["c4"] },
+    { ...claim("c4", "conflicted", 4), conflictsWith: ["c3"] },
+  ];
+  const out = selectClaims(claims, 5);
+  expect(out.verdict).toBe("ok");
+  expect(out.picked).toEqual(["c0", "c1", "c2"]);
+  expect(out.conflicted).toEqual(["c3", "c4"]);
+});
+
+test("never picks more than the slots allow", () => {
+  const claims = [
+    claim("c0", "strong", 3), claim("c1", "strong", 3),
+    claim("c2", "strong", 3), claim("c3", "strong", 3),
+  ];
+  expect(selectClaims(claims, 3).picked).toHaveLength(3);
+});
+```
+
+第四条是 spec §5.1 那条补充的直接翻译：**拨到 6 分钟专业也要至少 3 条 strong 打底——时长是用户的期望，不是伪造事实的理由。**
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/select.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/draft/select.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/draft/select.ts`：
+
+```ts
+import type { Claim, ClaimId } from "../domain/types.js";
+
+/** 一篇稿至少要有这么多条 strong 打底，无论拨到多长。spec §5.1。 */
+export const MINIMUM_STRONG_CLAIMS = 3;
+
+export interface Selection {
+  verdict: "ok" | "insufficient";
+  /** 进稿的 Claim，已按呈现顺序排好 */
+  picked: ClaimId[];
+  /** 检出冲突、因此不进稿的 Claim——④ 不建议播那一屏要列出来 */
+  conflicted: ClaimId[];
+  reason?: string;
+}
+
+/**
+ * ⑥ 的确定性一半：谁**有资格**进稿、够不够出稿。
+ * 至于进稿的这几条怎么排、钩子怎么下，那是编辑判断，交给模型（下一个计划）。
+ */
+export function selectClaims(claims: Claim[], factSlots: number): Selection {
+  const conflicted = claims.filter((c) => c.confidence === "conflicted").map((c) => c.id);
+
+  const byCorroboration = (a: Claim, b: Claim) =>
+    b.independence - a.independence || a.id.localeCompare(b.id);
+
+  const strong = claims.filter((c) => c.confidence === "strong").sort(byCorroboration);
+  const weak = claims.filter((c) => c.confidence === "weak").sort(byCorroboration);
+
+  if (strong.length < MINIMUM_STRONG_CLAIMS) {
+    return {
+      verdict: "insufficient",
+      picked: [],
+      conflicted,
+      reason: `only ${strong.length} strong claims, need ${MINIMUM_STRONG_CLAIMS}`,
+    };
+  }
+
+  const picked = [...strong, ...weak].slice(0, factSlots).map((c) => c.id);
+  return { verdict: "ok", picked, conflicted };
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/select.test.ts
+```
+
+Expected: `6 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/draft/select.ts pipeline/test/select.test.ts
+git commit -m "Pick which claims earn a place in eighty seconds"
+```
+
+---
+
+### Task 11: 逐句挂信源
+
+这是 §3 那句话的落地处：**信源是程序绑上去的，不是模型自称的。**
+
+**Files:**
+- Create: `pipeline/src/draft/bind.ts`
+- Test: `pipeline/test/bind.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/bind.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import type { DraftSentence } from "../src/domain/types.js";
+import { bindEvidence, sentenceFingerprint } from "../src/draft/bind.js";
+
+const VERIFIED = ["c0", "c1"];
+
+test("a fact sentence gets its claims bound and a fingerprint", () => {
+  const draft: DraftSentence[] = [
+    { text: "此次降准释放长期资金约 1 万亿元。", kind: "fact", claimIds: ["c0"] },
+  ];
+  const out = bindEvidence(draft, VERIFIED);
+  expect(out.ok).toBe(true);
+  expect(out.problems).toEqual([]);
+  expect(out.evidence).toEqual([
+    {
+      sentenceIndex: 0,
+      claimIds: ["c0"],
+      sentenceFingerprint: sentenceFingerprint("此次降准释放长期资金约 1 万亿元。"),
+    },
+  ]);
+});
+
+test("a fact sentence with no claims is rejected — the model made it up", () => {
+  const draft: DraftSentence[] = [
+    { text: "业内普遍认为这是重大利好。", kind: "fact", claimIds: [] },
+  ];
+  const out = bindEvidence(draft, VERIFIED);
+  expect(out.ok).toBe(false);
+  expect(out.problems).toEqual([{ sentenceIndex: 0, kind: "fact-without-claim" }]);
+});
+
+test("a claim that never passed verification is rejected", () => {
+  const draft: DraftSentence[] = [
+    { text: "此次降准释放长期资金约 1 万亿元。", kind: "fact", claimIds: ["c9"] },
+  ];
+  const out = bindEvidence(draft, VERIFIED);
+  expect(out.ok).toBe(false);
+  expect(out.problems).toEqual([{ sentenceIndex: 0, kind: "unknown-claim", claimId: "c9" }]);
+});
+
+test("an opinion sentence carrying claims has them stripped, not rejected", () => {
+  const draft: DraftSentence[] = [
+    { text: "我的判断是这一轮宽松还没到头。", kind: "opinion", claimIds: ["c0"] },
+  ];
+  const out = bindEvidence(draft, VERIFIED);
+  expect(out.ok).toBe(true);
+  expect(out.sentences[0]!.claimIds).toEqual([]);
+  expect(out.evidence).toEqual([]);
+});
+
+test("a transition sentence needs no claims", () => {
+  const draft: DraftSentence[] = [
+    { text: "央行今天突然出手了。", kind: "transition", claimIds: [] },
+  ];
+  expect(bindEvidence(draft, VERIFIED).ok).toBe(true);
+});
+
+test("every problem in a draft is reported, not just the first", () => {
+  const draft: DraftSentence[] = [
+    { text: "一。", kind: "fact", claimIds: [] },
+    { text: "二。", kind: "fact", claimIds: ["c9"] },
+  ];
+  const out = bindEvidence(draft, VERIFIED);
+  expect(out.problems).toHaveLength(2);
+});
+
+test("the fingerprint changes when the wording changes", () => {
+  const before = sentenceFingerprint("涉及金额约 23 亿美元。");
+  const after = sentenceFingerprint("涉及金额约 31 亿美元。");
+  expect(before).not.toBe(after);
+});
+
+test("the fingerprint ignores punctuation, so a comma edit keeps the sources", () => {
+  expect(sentenceFingerprint("降准，三月生效。")).toBe(sentenceFingerprint("降准三月生效"));
+});
+```
+
+最后两条是 spec §9.2 ③ 的要求：Safe Word 当场改稿之后，**改了数字就必须掉信源，只动标点不该掉。**
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/bind.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/draft/bind.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/draft/bind.ts`：
+
+```ts
+import { createHash } from "node:crypto";
+import { normalize } from "../dedupe/shingle.js";
+import type { ClaimId, DraftSentence } from "../domain/types.js";
+
+export type BindProblemKind = "fact-without-claim" | "unknown-claim";
+
+export interface BindProblem {
+  sentenceIndex: number;
+  kind: BindProblemKind;
+  claimId?: ClaimId;
+}
+
+export interface EvidenceRow {
+  sentenceIndex: number;
+  claimIds: ClaimId[];
+  sentenceFingerprint: string;
+}
+
+export interface BindResult {
+  ok: boolean;
+  problems: BindProblem[];
+  evidence: EvidenceRow[];
+  /** opinion 句的 claimIds 已剥离 */
+  sentences: DraftSentence[];
+}
+
+/**
+ * 句子的内容指纹。标点和空白不计入——录制中 Safe Word 只改个逗号不该让信源掉，
+ * 改了数字就必须掉。spec §9.2 ③。
+ */
+export function sentenceFingerprint(text: string): string {
+  return createHash("sha256").update(normalize(text)).digest("hex").slice(0, 16);
+}
+
+/**
+ * ⑧ 挂信源：**纯查表 + 校验，没有模型参与**。
+ *
+ * 这就是「每一句都可溯源」这句话敢写出来的全部理由：绑定是算出来的。
+ * 一旦这一步改成"让模型判断"，那句宣传就变成虚假宣传。
+ */
+export function bindEvidence(draft: DraftSentence[], verifiedClaimIds: ClaimId[]): BindResult {
+  const verified = new Set(verifiedClaimIds);
+  const problems: BindProblem[] = [];
+  const evidence: EvidenceRow[] = [];
+  const sentences: DraftSentence[] = [];
+
+  draft.forEach((sentence, sentenceIndex) => {
+    if (sentence.kind !== "fact") {
+      // 观点不该伪装成有据可依
+      sentences.push({ ...sentence, claimIds: [] });
+      return;
+    }
+
+    if (sentence.claimIds.length === 0) {
+      problems.push({ sentenceIndex, kind: "fact-without-claim" });
+      sentences.push(sentence);
+      return;
+    }
+
+    const unknown = sentence.claimIds.filter((id) => !verified.has(id));
+    for (const claimId of unknown) {
+      problems.push({ sentenceIndex, kind: "unknown-claim", claimId });
+    }
+    sentences.push(sentence);
+    if (unknown.length === 0) {
+      evidence.push({
+        sentenceIndex,
+        claimIds: sentence.claimIds,
+        sentenceFingerprint: sentenceFingerprint(sentence.text),
+      });
+    }
+  });
+
+  return { ok: problems.length === 0, problems, evidence, sentences };
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/bind.test.ts
+```
+
+Expected: `8 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/draft/bind.ts pipeline/test/bind.test.ts
+git commit -m "Bind sources to sentences by lookup, never by the model's word"
+```
+
+---
+
+### Task 12: 组合内核
+
+**Files:**
+- Create: `pipeline/src/core.ts`
+- Test: `pipeline/test/core.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/core.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import { buildBrief } from "../src/core.js";
+import type { CoreInput } from "../src/core.js";
+
+const WIRE = "央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。";
+
+function input(): CoreInput {
+  return {
+    durationSec: 60,
+    register: 0.25,
+    charsPerSecond: 5.5,
+    sources: [
+      { id: "s0", url: "https://pbc.example/a", publisher: "pbc", publishedAt: "2026-03-01T07:00:00Z", body: WIRE, creditedTo: null },
+      { id: "s1", url: "https://portal.example/a", publisher: "portal", publishedAt: "2026-03-01T07:20:00Z", body: `【转载】${WIRE}`, creditedTo: null },
+      { id: "s2", url: "https://reuters.example/a", publisher: "reuters", publishedAt: "2026-03-01T08:00:00Z", body: "Reuters 独立测算显示，此次操作对应释放的长期资金规模在一万亿元左右，生效日期为三月十五日。", creditedTo: null },
+      { id: "s3", url: "https://caixin.example/a", publisher: "caixin", publishedAt: "2026-03-01T09:00:00Z", body: "财新记者从多家银行了解到，此次降准释放长期资金约 1 万亿元，三月十五日起生效，信贷投放节奏将前移。", creditedTo: null },
+    ],
+    facts: [
+      { id: "f0", sourceId: "s0", text: "此次降准释放长期资金约 1 万亿元", quote: WIRE },
+      { id: "f1", sourceId: "s1", text: "此次降准将释放长期资金约 1 万亿元", quote: WIRE },
+      { id: "f2", sourceId: "s2", text: "此次降准释放长期资金约 1 万亿元", quote: "…一万亿元左右…" },
+      { id: "f3", sourceId: "s3", text: "此次降准释放长期资金约 1 万亿元", quote: "…约 1 万亿元…" },
+    ],
+    draft: [
+      { text: "央行今天突然出手了。", kind: "transition", claimIds: [] },
+      { text: "此次降准释放长期资金约 1 万亿元。", kind: "fact", claimIds: ["c0"] },
+      { text: "我的判断是这一轮宽松还没到头。", kind: "opinion", claimIds: [] },
+    ],
+  };
+}
+
+test("the four sources collapse to three groups and the claim is strong", () => {
+  const out = buildBrief(input());
+  expect(out.claims).toHaveLength(1);
+  expect(out.claims[0]!.independence).toBe(3);
+  expect(out.claims[0]!.confidence).toBe("strong");
+});
+
+test("one strong claim is not enough to produce a script", () => {
+  const out = buildBrief(input());
+  expect(out.verdict).toBe("insufficient");
+  expect(out.selection.reason).toBe("only 1 strong claims, need 3");
+});
+
+test("the estimate travels with the result", () => {
+  const out = buildBrief(input());
+  expect(out.estimate.durationSec).toBe(60);
+  expect(out.estimate.factSlots).toBe(3);
+});
+
+test("binding and prosody still run so problems surface even when insufficient", () => {
+  const out = buildBrief(input());
+  expect(out.bind.problems).toEqual([]);
+  expect(out.seconds).toBeGreaterThan(0);
+  expect(out.breaths.length).toBeGreaterThan(0);
+});
+
+test("a fabricated fact sentence is caught", () => {
+  const withLie = input();
+  withLie.draft.push({ text: "这是年内第三次降准。", kind: "fact", claimIds: [] });
+  const out = buildBrief(withLie);
+  expect(out.bind.ok).toBe(false);
+  expect(out.bind.problems).toEqual([{ sentenceIndex: 3, kind: "fact-without-claim" }]);
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/core.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/core.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/core.ts`：
+
+```ts
+import { classifyClaims } from "./dedupe/classify.js";
+import { mergeFacts } from "./dedupe/merge.js";
+import { estimateBrief, type BriefEstimate } from "./domain/estimate.js";
+import { breathMarks, estimateSeconds, type BreathMark } from "./domain/prosody.js";
+import type { Claim, DraftSentence, Fact, Source } from "./domain/types.js";
+import { bindEvidence, type BindResult } from "./draft/bind.js";
+import { selectClaims, type Selection } from "./draft/select.js";
+
+export interface CoreInput {
+  durationSec: number;
+  register: number;
+  /** 该用户的实测语速；没有就传语种默认值。见 spec §9.2 ①。 */
+  charsPerSecond: number;
+  sources: Source[];
+  facts: Fact[];
+  /** ⑦ 成稿的输出。本计划不产生它，由 fixture 提供。 */
+  draft: DraftSentence[];
+  mediaGroups?: Record<string, string>;
+}
+
+export interface CoreResult {
+  estimate: BriefEstimate;
+  claims: Claim[];
+  selection: Selection;
+  verdict: Selection["verdict"];
+  bind: BindResult;
+  seconds: number;
+  breaths: BreathMark[];
+}
+
+/**
+ * ④⑤⑥⑧⑨ 串起来——**全程没有一次模型调用，也没有一次网络请求**。
+ * 这正是 spec §11 那句「管线最关键的逻辑全部可以离线测试」的兑现。
+ */
+export function buildBrief(input: CoreInput): CoreResult {
+  const estimate = estimateBrief(input.durationSec, input.register);
+
+  const merged = mergeFacts(input.facts);
+  const claims = classifyClaims(merged, input.facts, input.sources, input.mediaGroups ?? {});
+  const selection = selectClaims(claims, estimate.factSlots);
+
+  // 即便 insufficient 也照样跑绑定与时长：问题要浮出来，不能被一个 verdict 盖掉
+  const verifiedIds = claims.filter((c) => c.confidence !== "conflicted").map((c) => c.id);
+  const bind = bindEvidence(input.draft, verifiedIds);
+
+  const texts = input.draft.map((s) => s.text);
+  return {
+    estimate,
+    claims,
+    selection,
+    verdict: selection.verdict,
+    bind,
+    seconds: texts.reduce((total, t) => total + estimateSeconds(t, input.charsPerSecond), 0),
+    breaths: breathMarks(texts),
+  };
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/core.test.ts
+```
+
+Expected: `5 passed`
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add pipeline/src/core.ts pipeline/test/core.test.ts
+git commit -m "Run the deterministic stages end to end"
+```
+
+---
+
+### Task 13: 命令行入口
+
+**Files:**
+- Create: `pipeline/src/cli.ts`
+- Create: `pipeline/test/fixtures/reserve-cut.json`
+- Test: `pipeline/test/cli.test.ts`
+
+- [ ] **Step 1: 写 fixture**
+
+`pipeline/test/fixtures/reserve-cut.json` —— 降准那条，三个独立源、一篇转载、一条数字冲突：
+
+```json
+{
+  "durationSec": 60,
+  "register": 0.25,
+  "charsPerSecond": 5.5,
+  "sources": [
+    { "id": "s0", "url": "https://pbc.example/a", "publisher": "pbc", "publishedAt": "2026-03-01T07:00:00Z", "body": "央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。", "creditedTo": null },
+    { "id": "s1", "url": "https://portal.example/a", "publisher": "portal", "publishedAt": "2026-03-01T07:20:00Z", "body": "【转载】央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。", "creditedTo": null },
+    { "id": "s2", "url": "https://reuters.example/a", "publisher": "reuters", "publishedAt": "2026-03-01T08:00:00Z", "body": "Reuters 独立测算显示，此次操作对应释放的长期资金规模在一万亿元左右，生效日期为三月十五日，涉及资金规模约 23 亿美元等值。", "creditedTo": null },
+    { "id": "s3", "url": "https://caixin.example/a", "publisher": "caixin", "publishedAt": "2026-03-01T09:00:00Z", "body": "财新记者从多家银行了解到，此次降准释放长期资金约 1 万亿元，三月十五日起生效，信贷投放节奏将前移。", "creditedTo": null },
+    { "id": "s4", "url": "https://bbg.example/a", "publisher": "bloomberg", "publishedAt": "2026-03-01T09:30:00Z", "body": "彭博社获得的数据显示，本轮操作对应的资金规模约 31 亿美元等值，与其他机构测算存在差异。", "creditedTo": null }
+  ],
+  "facts": [
+    { "id": "f0", "sourceId": "s0", "text": "此次降准释放长期资金约 1 万亿元", "quote": "此次降准将释放长期资金约一万亿元" },
+    { "id": "f1", "sourceId": "s1", "text": "此次降准将释放长期资金约 1 万亿元", "quote": "此次降准将释放长期资金约一万亿元" },
+    { "id": "f2", "sourceId": "s2", "text": "此次降准释放长期资金约 1 万亿元", "quote": "长期资金规模在一万亿元左右" },
+    { "id": "f3", "sourceId": "s3", "text": "此次降准释放长期资金约 1 万亿元", "quote": "释放长期资金约 1 万亿元" },
+    { "id": "f4", "sourceId": "s0", "text": "存款准备金率下调 0.5 个百分点", "quote": "下调金融机构存款准备金率零点五个百分点" },
+    { "id": "f5", "sourceId": "s2", "text": "存款准备金率下调 0.5 个百分点", "quote": "下调零点五个百分点" },
+    { "id": "f6", "sourceId": "s3", "text": "存款准备金率下调 0.5 个百分点", "quote": "降准零点五个百分点" },
+    { "id": "f7", "sourceId": "s0", "text": "新政自 3 月 15 日起生效", "quote": "自三月十五日起生效" },
+    { "id": "f8", "sourceId": "s2", "text": "新政自 3 月 15 日起生效", "quote": "生效日期为三月十五日" },
+    { "id": "f9", "sourceId": "s3", "text": "新政自 3 月 15 日起生效", "quote": "三月十五日起生效" },
+    { "id": "f10", "sourceId": "s2", "text": "涉及资金规模约 23 亿美元", "quote": "涉及资金规模约 23 亿美元等值" },
+    { "id": "f11", "sourceId": "s4", "text": "涉及资金规模约 31 亿美元", "quote": "资金规模约 31 亿美元等值" }
+  ],
+  "draft": [
+    { "text": "央行今天突然出手了。", "kind": "transition", "claimIds": [] },
+    { "text": "存款准备金率下调 0.5 个百分点，3 月 15 日正式生效。", "kind": "fact", "claimIds": ["c1", "c2"] },
+    { "text": "这次将释放长期资金约 1 万亿元。", "kind": "fact", "claimIds": ["c0"] },
+    { "text": "我的判断是，这一轮宽松还没到头。", "kind": "opinion", "claimIds": [] }
+  ]
+}
+```
+
+- [ ] **Step 2: 写失败的测试**
+
+`pipeline/test/cli.test.ts`：
+
+```ts
+import { execFileSync } from "node:child_process";
+import { expect, test } from "vitest";
+
+function run(fixture: string): { code: number; out: string } {
+  try {
+    return { code: 0, out: execFileSync("npx", ["tsx", "src/cli.ts", fixture], { encoding: "utf8" }) };
+  } catch (error) {
+    const e = error as { status: number; stdout: string };
+    return { code: e.status, out: e.stdout };
+  }
+}
+
+test("the reserve-cut fixture produces a script and exits zero", () => {
+  const { code, out } = run("test/fixtures/reserve-cut.json");
+  expect(code).toBe(0);
+
+  const result = JSON.parse(out);
+  expect(result.verdict).toBe("ok");
+  expect(result.bind.ok).toBe(true);
+});
+
+test("the twelve-repost source set is counted honestly", () => {
+  const { out } = run("test/fixtures/reserve-cut.json");
+  const result = JSON.parse(out);
+  const trillion = result.claims.find((c: { text: string }) => c.text.includes("1 万亿"));
+  expect(trillion.independence).toBe(3);
+  expect(trillion.confidence).toBe("strong");
+});
+
+test("the Reuters/Bloomberg figures come out conflicted and stay out of the script", () => {
+  const { out } = run("test/fixtures/reserve-cut.json");
+  const result = JSON.parse(out);
+  expect(result.selection.conflicted).toHaveLength(2);
+  for (const id of result.selection.conflicted) {
+    expect(result.selection.picked).not.toContain(id);
+  }
+});
+
+test("a missing fixture path exits non-zero", () => {
+  const { code } = run("test/fixtures/does-not-exist.json");
+  expect(code).not.toBe(0);
+});
+```
+
+- [ ] **Step 3: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/cli.test.ts
+```
+
+Expected: FAIL —— `src/cli.ts` 不存在，四条全部失败
+
+- [ ] **Step 4: 实现**
+
+`pipeline/src/cli.ts`：
+
+```ts
+import { readFileSync } from "node:fs";
+import { buildBrief, type CoreInput } from "./core.js";
+
+/**
+ * 把一份固定数据跑过确定性内核，结果打到 stdout。
+ *
+ *   npm run brief -- test/fixtures/reserve-cut.json
+ *
+ * 模型与网络层接进来之后，这个入口仍然有用：它是唯一能**不花一分钱**
+ * 反复验证 ④⑤⑥⑧⑨ 的地方。
+ */
+function main(argv: string[]): number {
+  const path = argv[2];
+  if (path === undefined) {
+    process.stderr.write("usage: brief <fixture.json>\n");
+    return 2;
+  }
+
+  let input: CoreInput;
+  try {
+    input = JSON.parse(readFileSync(path, "utf8")) as CoreInput;
+  } catch (error) {
+    process.stderr.write(`cannot read ${path}: ${(error as Error).message}\n`);
+    return 2;
+  }
+
+  const result = buildBrief(input);
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+
+  // 出稿了但绑定有问题，是最该被 CI 拦住的情况
+  if (result.verdict === "ok" && !result.bind.ok) return 1;
+  return 0;
+}
+
+process.exit(main(process.argv));
+```
+
+- [ ] **Step 5: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/cli.test.ts
+```
+
+Expected: `4 passed`
+
+- [ ] **Step 6: 手动看一眼输出**
+
+```bash
+cd pipeline && npm run brief -- test/fixtures/reserve-cut.json
+```
+
+Expected: JSON 里 `verdict: "ok"`、「1 万亿」那条 `independence: 3`、`selection.conflicted` 有两条
+
+- [ ] **Step 7: 全量测试**
+
+```bash
+cd pipeline && npm test && npm run typecheck
+```
+
+Expected: 全部通过，typecheck 无输出
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add pipeline/src/cli.ts pipeline/test/cli.test.ts pipeline/test/fixtures/reserve-cut.json
+git commit -m "Feed one news story through the core from the command line"
+```
+
+---
+
+### Task 14: 数据库迁移
+
+**Files:**
+- Create: `backend/supabase/migrations/0002_briefs.sql`
+
+- [ ] **Step 1: 写迁移**
+
+`backend/supabase/migrations/0002_briefs.sql`：
+
+```sql
+-- ---------------------------------------------------------------------------
+-- Brief（一次「新闻 → 口播稿」任务）及其证据层
+-- 设计见 docs/superpowers/specs/2026-09-17-news-brief-pipeline-design.md §9
+-- ---------------------------------------------------------------------------
+
+create table briefs (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  -- 只有两类：文本、图。链接是文本的子情况，由管线自己判断（§9 决策）
+  input_kind text not null check (input_kind in ('text', 'image')),
+  input_payload text not null,
+  -- 口述路径带的「我想怎么播」，链接/截图路径为 null（§2.3）
+  angle text,
+  duration_sec integer not null,
+  -- 0.0 八卦 – 1.0 专业
+  register real not null check (register >= 0 and register <= 1),
+  status text not null default 'queued'
+    check (status in ('queued', 'running', 'drafted', 'confirmed', 'insufficient', 'failed', 'canceled')),
+  verdict text,
+  tokens_budget integer not null,
+  tokens_used integer not null default 0,
+  cost_cents integer not null default 0,
+  script_id uuid references scripts (id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table briefs enable row level security;
+
+create policy "briefs are owner-scoped" on briefs
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- 阶段状态机（§4.2）。每阶段结果落库，所以可观测、可重跑、可分别记 token。
+create table brief_stages (
+  id uuid primary key default gen_random_uuid(),
+  brief_id uuid not null references briefs (id) on delete cascade,
+  stage text not null,
+  status text not null default 'pending'
+    check (status in ('pending', 'running', 'done', 'failed')),
+  tokens_used integer not null default 0,
+  result jsonb,
+  error text,
+  started_at timestamptz,
+  ended_at timestamptz,
+  unique (brief_id, stage)
+);
+
+alter table brief_stages enable row level security;
+
+create policy "brief_stages follow their brief" on brief_stages
+  for all using (
+    exists (select 1 from briefs b where b.id = brief_stages.brief_id and b.user_id = auth.uid())
+  );
+
+create table brief_sources (
+  id uuid primary key default gen_random_uuid(),
+  brief_id uuid not null references briefs (id) on delete cascade,
+  url text not null,
+  publisher text not null,
+  published_at timestamptz,
+  body text not null,
+  -- 存下来只为审计和排查；分组时由管线从 body 现算，不依赖这一列
+  fingerprint text,
+  credited_to text
+);
+
+alter table brief_sources enable row level security;
+
+create policy "brief_sources follow their brief" on brief_sources
+  for all using (
+    exists (select 1 from briefs b where b.id = brief_sources.brief_id and b.user_id = auth.uid())
+  );
+
+create table brief_facts (
+  id uuid primary key default gen_random_uuid(),
+  brief_id uuid not null references briefs (id) on delete cascade,
+  source_id uuid not null references brief_sources (id) on delete cascade,
+  text text not null,
+  -- 原文逐字引文。后面一切的根（§4.3）
+  quote text not null
+);
+
+alter table brief_facts enable row level security;
+
+create policy "brief_facts follow their brief" on brief_facts
+  for all using (
+    exists (select 1 from briefs b where b.id = brief_facts.brief_id and b.user_id = auth.uid())
+  );
+
+create table brief_claims (
+  id uuid primary key default gen_random_uuid(),
+  brief_id uuid not null references briefs (id) on delete cascade,
+  text text not null,
+  -- 互不相关的信源组数量，不是信源条数
+  independence integer not null default 0,
+  confidence text not null check (confidence in ('strong', 'weak', 'conflicted'))
+);
+
+alter table brief_claims enable row level security;
+
+create policy "brief_claims follow their brief" on brief_claims
+  for all using (
+    exists (select 1 from briefs b where b.id = brief_claims.brief_id and b.user_id = auth.uid())
+  );
+
+create table claim_facts (
+  claim_id uuid not null references brief_claims (id) on delete cascade,
+  fact_id uuid not null references brief_facts (id) on delete cascade,
+  primary key (claim_id, fact_id)
+);
+
+alter table claim_facts enable row level security;
+
+create policy "claim_facts follow their claim" on claim_facts
+  for all using (
+    exists (
+      select 1 from brief_claims c join briefs b on b.id = c.brief_id
+      where c.id = claim_facts.claim_id and b.user_id = auth.uid()
+    )
+  );
+
+-- ---------------------------------------------------------------------------
+-- 证据层：挂在 Script 旁边，Script 自己不加字段（§4.1）
+-- ---------------------------------------------------------------------------
+
+create table script_evidence (
+  sentence_id uuid not null references sentences (id) on delete cascade,
+  claim_id uuid not null references brief_claims (id) on delete cascade,
+  -- 写入时的句子内容指纹。Safe Word 当场改稿后文本一变，这一句降级为
+  -- 「已改动 · 无信源」，而不是继续显示旧信源（§9.2 ③）
+  sentence_fingerprint text not null,
+  primary key (sentence_id, claim_id)
+);
+
+alter table script_evidence enable row level security;
+
+create policy "script_evidence follows its script" on script_evidence
+  for all using (
+    exists (
+      select 1 from sentences s
+      join paragraphs p on p.id = s.paragraph_id
+      join script_sections sec on sec.id = p.section_id
+      join scripts sc on sc.id = sec.script_id
+      where s.id = script_evidence.sentence_id and sc.user_id = auth.uid()
+    )
+  );
+
+-- 气口与重读。同样挂在旁边——sentences 表不加列（§9.2 ⑤）
+create table sentence_prosody (
+  sentence_id uuid primary key references sentences (id) on delete cascade,
+  breath_after text check (breath_after in ('long', 'short', 'none')),
+  emphasis_spans jsonb not null default '[]'::jsonb
+);
+
+alter table sentence_prosody enable row level security;
+
+create policy "sentence_prosody follows its script" on sentence_prosody
+  for all using (
+    exists (
+      select 1 from sentences s
+      join paragraphs p on p.id = s.paragraph_id
+      join script_sections sec on sec.id = p.section_id
+      join scripts sc on sc.id = sec.script_id
+      where s.id = sentence_prosody.sentence_id and sc.user_id = auth.uid()
+    )
+  );
+
+-- ---------------------------------------------------------------------------
+-- 实测语速。这份数据目前根本不存在（§9.2 ①）——本迁移只建表，
+-- iOS 侧的采集是另一个计划。
+-- ---------------------------------------------------------------------------
+
+create table user_reading_rates (
+  user_id uuid not null references auth.users (id) on delete cascade,
+  language text not null check (language in ('cjk', 'latin')),
+  chars_per_second real not null check (chars_per_second > 0),
+  sample_count integer not null default 1,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, language)
+);
+
+alter table user_reading_rates enable row level security;
+
+create policy "user_reading_rates are owner-scoped" on user_reading_rates
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create index brief_stages_brief_idx on brief_stages (brief_id);
+create index brief_sources_brief_idx on brief_sources (brief_id);
+create index brief_facts_brief_idx on brief_facts (brief_id);
+create index brief_claims_brief_idx on brief_claims (brief_id);
+create index briefs_user_status_idx on briefs (user_id, status);
+```
+
+- [ ] **Step 2: 本地建库验证**
+
+按 `backend/README.md` 的既有做法，在临时 Postgres 上跑 `0001` 再跑 `0002`：
+
+```bash
+cd /Users/fengzhou/Code/PolluxOne/backend
+psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql
+psql "$DATABASE_URL" -f supabase/migrations/0002_briefs.sql
+```
+
+Expected: 两个文件都无错误退出（`CREATE TABLE` / `CREATE POLICY` 回显，无 `ERROR:`）
+
+- [ ] **Step 3: 确认外键指向真的存在**
+
+```bash
+psql "$DATABASE_URL" -c "\d script_evidence" -c "\d user_reading_rates"
+```
+
+Expected: `script_evidence.sentence_id` 指向 `sentences(id)`、`claim_id` 指向 `brief_claims(id)`；`user_reading_rates` 有 `(user_id, language)` 复合主键
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add backend/supabase/migrations/0002_briefs.sql
+git commit -m "Make room for briefs, their evidence, and how fast people read"
+```
+
+---
+
+### Task 15: 收口
+
+**Files:**
+- Create: `pipeline/README.md`
+- Modify: `README.md`
+
+- [ ] **Step 1: 写 pipeline/README.md**
+
+```markdown
+# pipeline
+
+「新闻 → 口播稿」调研管线。设计见
+`docs/superpowers/specs/2026-09-17-news-brief-pipeline-design.md`。
+
+**这个包目前只有确定性内核**——spec §3 说的「刻意不用 AI 的那几步」：
+
+| 阶段 | 模块 |
+|---|---|
+| ④ 归并去重 | `src/dedupe/merge.ts` |
+| ⑤ 交叉验证 | `src/dedupe/independence.ts` · `conflict.ts` · `classify.ts` |
+| ⑥ 选点（名额与门槛） | `src/draft/select.ts` |
+| ⑧ 挂信源 | `src/draft/bind.ts` |
+| ⑨ 时长与气口 | `src/domain/prosody.ts` |
+| §10.1 成本估算 | `src/domain/estimate.ts` |
+
+①抓原文 ②扩展检索 ③抽事实 ⑦成稿 属于模型与网络层，**还没做**。
+
+## 跑
+
+    npm install
+    npm test          # 全部离线，不需要任何 API key
+    npm run typecheck
+    npm run brief -- test/fixtures/reserve-cut.json
+
+`npm test` 一次模型都不调、一个网络请求都不发。这是有意的：**护城河上的算术
+必须能不花钱地反复验证。**
+
+## 运行时依赖为零
+
+和 iOS 侧「V1 无第三方 SPM 包」同一条纪律。devDependencies 只有 typescript、
+vitest、tsx。
+```
+
+- [ ] **Step 2: 在根 README 的项目结构里加一行**
+
+把根 `README.md` 里这段：
+
+```
+├── backend/      Supabase schema / RLS migrations
+```
+
+改成：
+
+```
+├── backend/      Supabase schema / RLS migrations
+├── pipeline/     「新闻 → 口播稿」调研管线（TypeScript，零运行时依赖）
+```
+
+- [ ] **Step 3: 全量验证**
+
+```bash
+cd /Users/fengzhou/Code/PolluxOne/pipeline && npm test && npm run typecheck
+cd /Users/fengzhou/Code/PolluxOne && ./scripts/test-engines.sh
+```
+
+Expected: pipeline 全绿；iOS harness 仍然 `TOTAL: N passed, 0 failed`（本计划没碰 Swift，但要确认没连带破坏）
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add pipeline/README.md README.md
+git commit -m "Say what the pipeline does and does not do yet"
+```
+
+---
+
+## 完成标准
+
+- `cd pipeline && npm test` 全绿，**零 API key、零网络**
+- `npm run brief -- test/fixtures/reserve-cut.json`：「1 万亿」那条 `independence: 3`（不是 4，因为一篇是转载）、路透/彭博两条 `conflicted` 且不进稿
+- spec §11 的前四行测试全部有对应的断言
+- `0002_briefs.sql` 在本地 Postgres 上跑得过
+
+## 交给下一个计划的东西
+
+1. **模型与网络层**：①抓原文 ②扩展检索 ③抽事实 ⑦成稿，以及 §4.2 的阶段状态机
+2. **语义冲突检测**：数字之外的冲突，需要 `deepseek-flash` 二分类
+3. **`ESTIMATE_COEFFICIENTS` 回归校准**：用真实样本的实际消耗，把 Task 8 里钉住的系数换成量出来的
+4. **两个锚点的稿件质量评估**：`1:00 通俗` 与 `3:00 偏专业`，spec §11 最后一行——这才是第一段真正要回答的问题
+5. **`user_reading_rates` 的 iOS 采集**：导出 `ReadingPacer.rate`，独立计划
+6. **`angle` 的消费**：迁移已经建了列（§2.3），但把它当 ⑥ 选点的软约束是模型侧的事
+7. **落库时的文本口径**：本包只产出**句子文本**，从不拼接整篇——spec §9.2 ④ 警告过
+   两边各拼一次会让提词器的字偏移永久性偏移且随脚本长度累积。排版口径由
+   `PromptScriptText` 唯一持有。下一个计划写库时必须守住这条
