@@ -417,6 +417,28 @@ test("an explicit credit line collapses a source into the one it credits", () =>
   expect(groupSources(sources)).toHaveLength(1);
 });
 
+test("rule 2 works whichever way round the credit line sits", () => {
+  // 上一条测试里被 credit 的一方排在前面，只命中了 `b.creditedTo === a.publisher`。
+  // 这一条把顺序倒过来，钉住另半个子句——不然把它删掉，七个测试照样全绿。
+  const sources = [
+    src("s0", "portal-a", "据新华社报道，央行今日决定实施降准，市场反应积极，多位分析师认为这一决定符合预期。", "xinhua"),
+    src("s1", "xinhua", WIRE),
+  ];
+  expect(groupSources(sources)).toHaveLength(1);
+});
+
+test("the fingerprint threshold is inclusive at exactly 0.5", () => {
+  // abcdefg → abcde bcdef cdefg；bcdefgh → bcdef cdefg defgh
+  // 共享 2 个，并集 3 + 3 − 2 = 4，jaccard 恰好 0.5。
+  // `>=` 归并、`>` 不归并——这是唯一能钉住那个运算符的测试。
+  const atThreshold = [src("s0", "portal-a", "abcdefg"), src("s1", "portal-b", "bcdefgh")];
+  expect(groupSources(atThreshold)).toHaveLength(1);
+
+  // abcdefg vs cdefghi 只共享 cdefg，jaccard 0.2，不该归并
+  const below = [src("s0", "portal-a", "abcdefg"), src("s1", "portal-b", "cdefghi")];
+  expect(groupSources(below)).toHaveLength(2);
+});
+
 test("same publisher is one source even when the two pieces differ", () => {
   const sources = [
     src("s0", "caixin", "央行降准零点五个百分点，为年内第二次，释放资金约一万亿元。"),
@@ -490,6 +512,15 @@ export interface SourceGroup {
  * 把互相转载、互相署名、同一媒体主体的 Source 并成一组。
  * **组数才是 independence，信源条数不是。** 同一份通讯社稿被五家门户转载，
  * 是 1 个源不是 5 个——这个数字算错，整个「每句可溯源」的承诺就是假的。
+ *
+ * **已知盲区**——两处都朝「独立源算多了」这个危险方向，修法涉及产品判断而非
+ * 机械修复，记在下一个计划里：
+ *
+ * 1. 只逐字摘引 wire 稿一段、其余自己写的轻改转载，整篇 5-gram Jaccard 会远低于
+ *    0.5，三条规则全部漏掉，于是同一份通稿被当成两个独立源。要接住它得上段落级
+ *    或滑窗级相似度。
+ * 2. 两家门户都写「据新华社报道」、而新华社原稿不在本次信源集合里时，rule 2 不匹配
+ *    ——它比的是 `a.creditedTo === b.publisher`，不是两边 `creditedTo` 相等。
  *
  * @param mediaGroups publisher → 媒体集团 key 的映射。同集团视为同一主体。
  */
@@ -572,7 +603,7 @@ export function independenceOf(cited: SourceId[], groups: SourceGroup[]): number
 cd pipeline && npx vitest run test/independence.test.ts
 ```
 
-Expected: `7 passed`
+Expected: `9 passed`
 
 - [ ] **Step 5: 提交**
 
@@ -2332,6 +2363,9 @@ git commit -m "Say what the pipeline does and does not do yet"
 4. **两个锚点的稿件质量评估**：`1:00 通俗` 与 `3:00 偏专业`，spec §11 最后一行——这才是第一段真正要回答的问题
 5. **`user_reading_rates` 的 iOS 采集**：导出 `ReadingPacer.rate`，独立计划
 6. **`angle` 的消费**：迁移已经建了列（§2.3），但把它当 ⑥ 选点的软约束是模型侧的事
-7. **落库时的文本口径**：本包只产出**句子文本**，从不拼接整篇——spec §9.2 ④ 警告过
+7. **独立源规则集的两个盲区**（§5 的规则现在漏这两类，都朝算多的方向）：
+   轻改+只摘引一段的转载逃过整篇 Jaccard；两家都引一个不在信源集合里的通讯社时
+   `creditedTo` 不相等匹配。前者要段落级相似度，后者要决定「同 creditedTo 是否即归并」
+8. **落库时的文本口径**：本包只产出**句子文本**，从不拼接整篇——spec §9.2 ④ 警告过
    两边各拼一次会让提词器的字偏移永久性偏移且随脚本长度累积。排版口径由
    `PromptScriptText` 唯一持有。下一个计划写库时必须守住这条
