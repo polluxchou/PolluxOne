@@ -315,5 +315,16 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     rich.snap(to: .professionalThreeMinutes)
     report.check(rich.canAfford && rich.blockReason == nil, "余额够就放行")
 
+    report.section("⑥ 不建议播")
+    let shortOfSources = InsufficientState(found: 2, required: 3, tokensUsed: 12_400)
+    report.check(shortOfSources.headline.contains("2") && shortOfSources.headline.contains("3"),
+                 "说清找到几个、需要几个", detail: shortOfSources.headline)
+    report.check(shortOfSources.headline.contains("独立信源"), "说的是独立信源，不是篇数")
+    report.check(!shortOfSources.actions.contains { $0.id == "forceDraft" },
+                 "不提供强行出稿——给一个绕过拒绝的出口，这套承诺就全是装饰")
+    report.check(shortOfSources.actions.contains { $0.id == "retry" }, "可以再找一轮")
+    report.check(shortOfSources.actions.contains { $0.id == "another" }, "可以换一条")
+    report.check(shortOfSources.costNote.contains("12"), "已消耗照实显示", detail: shortOfSources.costNote)
+
     return (report.pass, report.fail)
 }
