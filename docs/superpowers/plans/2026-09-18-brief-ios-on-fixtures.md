@@ -2057,15 +2057,15 @@ struct InsufficientState: Equatable {
 
 ```swift
     report.section("⑥ 不建议播")
-    let short = InsufficientState(found: 2, required: 3, tokensUsed: 12_400)
-    report.check(short.headline.contains("2") && short.headline.contains("3"),
-                 "说清找到几个、需要几个", detail: short.headline)
-    report.check(short.headline.contains("独立信源"), "说的是独立信源，不是篇数")
-    report.check(!short.actions.contains { $0.id == "forceDraft" },
+    let shortOfSources = InsufficientState(found: 2, required: 3, tokensUsed: 12_400)
+    report.check(shortOfSources.headline.contains("2") && shortOfSources.headline.contains("3"),
+                 "说清找到几个、需要几个", detail: shortOfSources.headline)
+    report.check(shortOfSources.headline.contains("独立信源"), "说的是独立信源，不是篇数")
+    report.check(!shortOfSources.actions.contains { $0.id == "forceDraft" },
                  "不提供强行出稿——给一个绕过拒绝的出口，这套承诺就全是装饰")
-    report.check(short.actions.contains { $0.id == "retry" }, "可以再找一轮")
-    report.check(short.actions.contains { $0.id == "another" }, "可以换一条")
-    report.check(short.costNote.contains("12"), "已消耗照实显示", detail: short.costNote)
+    report.check(shortOfSources.actions.contains { $0.id == "retry" }, "可以再找一轮")
+    report.check(shortOfSources.actions.contains { $0.id == "another" }, "可以换一条")
+    report.check(shortOfSources.costNote.contains("12"), "已消耗照实显示", detail: shortOfSources.costNote)
 ```
 
 - [ ] **Step 3: 写 View、接进测试台、跑绿、提交**
