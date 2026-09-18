@@ -43,6 +43,35 @@ test("both axes only ever push cost up", () => {
   }
 });
 
+test("a value exactly between two steps rounds down", () => {
+  // 拨盘被拖拽时中点天天经过。`<` 加上从左往右 reduce，等距时保留更小的档——
+  // 改成 `<=` 会把所有中点静默翻向上，而 Swift 端若实现方式不同就会和这里分歧。
+  expect(estimateBrief(37.5, 0.5).durationSec).toBe(30);
+  expect(estimateBrief(105, 0.5).durationSec).toBe(90);
+  expect(estimateBrief(270, 0.5).durationSec).toBe(240);
+});
+
+test("the register axis pushes cost up too", () => {
+  // 上一条只扫了 duration 轴，名字却说「两轴」。这一条把 register 轴补上。
+  let previous = -1;
+  for (const register of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+    const tokens = estimateBrief(120, register).tokens;
+    expect(tokens).toBeGreaterThan(previous);
+    previous = tokens;
+  }
+});
+
+test("the source count rounds rather than truncates", () => {
+  // 两个锚点取整前恰好都是整数（11.0 和 21.0），所以 round→floor 这个改动
+  // 在它们身上完全隐身。(90, 0.5) 取整前是 14.5，能区分。
+  const e = estimateBrief(90, 0.5);
+  expect(e.sources).toBe(15);
+  expect(e.tokens).toBe(104000);
+  expect(e.factSlots).toBe(4);
+  expect(e.researchMinutes).toBe(5);
+});
+
+// 做回归标定的人注意：这条会在你第一次改系数时失败，那是设计如此，不是你引入的 bug。
 test("the coefficients are pinned so a change has to be deliberate", () => {
   expect(ESTIMATE_COEFFICIENTS).toEqual({
     tokensBase: 15000,

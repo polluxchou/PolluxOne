@@ -30,6 +30,13 @@ export interface BriefEstimate {
   researchMinutes: number;
 }
 
+/**
+ * 落到最近的一档。**等距时保留更小的那一档**（`<` 加上从左往右扫描）——
+ * 拨盘拖拽时中点天天经过，这个方向必须是写明的决定，不能是实现的副产品。
+ *
+ * iOS 侧的拨盘本来只会产出这十个值，所以这里的 snap 是**防御性**的；
+ * 档位的权威定义始终是 `DURATION_STEPS` 本身。
+ */
 function snapDuration(durationSec: number): number {
   return DURATION_STEPS.reduce((best, step) =>
     Math.abs(step - durationSec) < Math.abs(best - durationSec) ? step : best,
@@ -48,7 +55,9 @@ export function estimateBrief(durationSec: number, register: number): BriefEstim
   return {
     durationSec: sec,
     register: reg,
-    tokens: c.tokensBase + sec * c.tokensPerSecond + reg * c.tokensPerRegister,
+    // register 是连续量（拨盘可以停在任意位置），所以这一项会出小数。
+    // token 是计数单位，而且同一个对象里另外三个字段都取整了。
+    tokens: Math.round(c.tokensBase + sec * c.tokensPerSecond + reg * c.tokensPerRegister),
     sources: Math.round(c.sourcesBase + (sec / 60) * c.sourcesPerMinute + reg * c.sourcesPerRegister),
     factSlots: Math.max(c.minimumFactSlots, Math.round(sec / c.secondsPerFactSlot)),
     researchMinutes: Math.round(c.minutesBase + (sec / 60) * c.minutesPerMinute + reg * c.minutesPerRegister),
