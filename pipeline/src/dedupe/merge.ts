@@ -1,5 +1,6 @@
 import type { Fact, MergedClaim } from "../domain/types.js";
 import { jaccard, shingles, TEXT_SHINGLE_K } from "./shingle.js";
+import { createUnionFind } from "./union-find.js";
 
 /** 数字一致时，文本相似到这个值就算同一件事。 */
 export const MERGE_JACCARD = 0.45;
@@ -39,17 +40,7 @@ function sameNumbers(a: string[], b: string[]): boolean {
  * 返回 MergedClaim——independence 和 confidence 是 ⑤ 的事，这里连字段都没有。
  */
 export function mergeFacts(facts: Fact[]): MergedClaim[] {
-  const parent = facts.map((_, i) => i);
-  const find = (i: number): number => {
-    let root = i;
-    while (parent[root] !== root) root = parent[root]!;
-    return root;
-  };
-  const union = (a: number, b: number): void => {
-    const ra = find(a);
-    const rb = find(b);
-    if (ra !== rb) parent[rb] = ra;
-  };
+  const uf = createUnionFind(facts.length);
 
   const prints = facts.map((f) => shingles(f.text, TEXT_SHINGLE_K));
   const numbers = facts.map((f) => numericSignature(f.text));
@@ -61,19 +52,11 @@ export function mergeFacts(facts: Fact[]): MergedClaim[] {
       if (!sameNumbers(na, nb)) continue;
 
       const bar = na.length === 0 ? MERGE_JACCARD_NO_NUMBERS : MERGE_JACCARD;
-      if (jaccard(prints[i]!, prints[j]!) >= bar) union(i, j);
+      if (jaccard(prints[i]!, prints[j]!) >= bar) uf.union(i, j);
     }
   }
 
-  const byRoot = new Map<number, number[]>();
-  for (let i = 0; i < facts.length; i++) {
-    const root = find(i);
-    const bucket = byRoot.get(root);
-    if (bucket) bucket.push(i);
-    else byRoot.set(root, [i]);
-  }
-
-  return [...byRoot.values()].map((indices, n) => {
+  return uf.groups().map((indices, n) => {
     // 最长的措辞信息量最大，用它当 Claim 的表述
     const longest = indices.reduce((best, i) =>
       facts[i]!.text.length > facts[best]!.text.length ? i : best, indices[0]!);
