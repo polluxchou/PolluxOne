@@ -19,16 +19,16 @@ export const ZHIPU_SEARCH_PRICE_YUAN: Record<ZhipuSearchEngine, number> = {
 };
 
 /**
- * 账本的单位是美分（pricing.ts 的价目表是「美分 / 每百万 token」），而智谱
- * 报价是人民币。汇率在这里是一个**手填的常量**，不查实时汇率：账单要可复现，
- * 同一次运行重算两遍必须得到同一个数。写死并标注日期，好过让账单里混进两种货币。
- * 2026-09-18：1 USD ≈ 7.1 CNY。
+ * 一次检索多少**人民币分**。engine 决定价格，和返回多少条结果无关。
+ *
+ * 账本和价目表现在都以人民币分记账，这里只是元换分，中间**没有汇率**：
+ * 原先那个手填的 `CNY_PER_USD` 是 Anthropic 时代的遗留，它会随时间漂移，
+ * 而且事后无法从账目里复现——账单上的每一分钱都该能被重新算出来。
+ *
+ * `Math.round`：0.03 × 100 在二进制浮点下未必正好是 3，而按次计费本来就是整数分。
  */
-export const CNY_PER_USD = 7.1;
-
-/** 一次检索多少美分。engine 决定价格，和返回多少条结果无关。 */
 export function searchCostCents(engine: ZhipuSearchEngine): number {
-  return (ZHIPU_SEARCH_PRICE_YUAN[engine] / CNY_PER_USD) * 100;
+  return Math.round(ZHIPU_SEARCH_PRICE_YUAN[engine] * 100);
 }
 
 /** 文档写明 search_query 建议 ≤70 字符，超了按截断处理更可控。 */

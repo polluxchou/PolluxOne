@@ -1,5 +1,5 @@
 // pipeline/src/models/ledger.ts
-import { costOf, type Usage } from "./pricing.js";
+import { costOf, isPeakRate, type Usage } from "./pricing.js";
 
 export type StageName =
   | "fetch"
@@ -13,9 +13,14 @@ interface TokenEntry {
   stage: StageName;
   model: string;
   usage: Usage;
+  /**
+   * 这次调用发生时是不是高峰时段。**存判定结果，不存时刻，更不在结账时重算**：
+   * 高峰价是空闲价的两倍，重算意味着同一笔账在 17:59 和 18:01 结出的钱不一样。
+   */
+  peak: boolean;
 }
 
-/** 按次计费的一笔支出：没有 token，只有次数和单价。 */
+/** 按次计费的一笔支出：没有 token，只有次数和单价（人民币分）。 */
 interface FlatEntry {
   kind: "flat";
   stage: StageName;
@@ -31,7 +36,7 @@ export interface Totals {
   reasoningTokens: number;
 }
 
-/** 分阶段的账：token 归 token，按次计费的钱单列一栏。 */
+/** 分阶段的账：token 归 token，按次计费的钱（人民币分）单列一栏。 */
 export interface StageTotals extends Totals {
   flatCostCents: number;
 }
@@ -43,14 +48,22 @@ export interface StageTotals extends Totals {
 export class TokenLedger {
   private entries: Entry[] = [];
 
-  record(stage: StageName, model: string, usage: Usage): void {
+  /**
+   * 记一次模型调用。
+   *
+   * `at` 是这次调用发生的时刻，默认「现在」——峰谷判定在这里**一次性做完并
+   * 存下来**，结账时只读不算。金额于是和结账时间无关：一笔账记下来是多少，
+   * 一小时后重算还是多少。
+   */
+  record(stage: StageName, model: string, usage: Usage, at: Date = new Date()): void {
+    const peak = isPeakRate(at);
     // 先算一次价：模型不在价目表里要在记账时就炸，而不是在结账时。
-    costOf(model, usage);
-    this.entries.push({ kind: "tokens", stage, model, usage });
+    costOf(model, usage, peak);
+    this.entries.push({ kind: "tokens", stage, model, usage, peak });
   }
 
   /**
-   * 按次计费的一笔支出（智谱 Web Search：0.01 元/次，没有 token）。
+   * 按次计费的一笔支出（智谱 Web Search：0.01 元/次 = 1 分/次，没有 token）。
    *
    * 它必须是**独立的一条通道**，不能折算成假 token 塞进 record()：
    * 账单同时要回答「花了多少钱」和「烧了多少 token」两个问题，硬凑一个
@@ -103,9 +116,10 @@ export class TokenLedger {
     return out;
   }
 
+  /** 总账，单位**人民币分**。峰谷用的是记账当时存下的判定，不重新取时间。 */
   totalCostCents(): number {
     return this.entries.reduce(
-      (sum, e) => sum + (e.kind === "tokens" ? costOf(e.model, e.usage) : e.cents),
+      (sum, e) => sum + (e.kind === "tokens" ? costOf(e.model, e.usage, e.peak) : e.cents),
       0,
     );
   }

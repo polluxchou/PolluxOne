@@ -2,7 +2,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { TokenLedger } from "../../src/models/ledger.js";
 import {
-  CNY_PER_USD,
   MAX_QUERY_CHARS,
   ZHIPU_SEARCH_URL,
   ZhipuSearchClient,
@@ -58,9 +57,20 @@ describe("collectZhipuResults", () => {
 
 describe("searchCostCents", () => {
   it("按档位定价，与返回多少条结果无关", () => {
-    // 0.01 元/次，按 CNY_PER_USD 折成美分
-    expect(searchCostCents("search_std")).toBeCloseTo((0.01 / CNY_PER_USD) * 100, 9);
+    // 0.01 元/次 = 1 分/次。账本就是人民币分，中间没有汇率可折。
+    expect(searchCostCents("search_std")).toBe(1);
     expect(searchCostCents("search_pro")).toBeCloseTo(searchCostCents("search_std") * 3, 9);
+  });
+
+  it("按次计费是整数分——浮点尾巴不许进账本", () => {
+    for (const engine of [
+      "search_std",
+      "search_pro",
+      "search_pro_sogou",
+      "search_pro_quark",
+    ] as const) {
+      expect(Number.isInteger(searchCostCents(engine))).toBe(true);
+    }
   });
 
   it("sogou / quark 是最贵的一档", () => {

@@ -3,19 +3,27 @@ import { describe, expect, it } from "vitest";
 import { PRICES, costOf } from "../../src/models/pricing.js";
 import { TokenLedger } from "../../src/models/ledger.js";
 
+/** 周六 10:00（北京），全天空闲价。峰谷判定的边界用例在 pricing.test.ts。 */
+const OFF_PEAK = new Date("2026-09-26T10:00:00+08:00");
+
 describe("costOf", () => {
   it("按每百万 token 计价", () => {
-    // sonnet-5: $2 输入 / $10 输出
-    const cents = costOf("claude-sonnet-5", { inputTokens: 1_000_000, outputTokens: 0 });
-    expect(cents).toBeCloseTo(200, 6);
+    // deepseek-flash 输入·未命中·空闲：1 元/MTok = 100 分
+    const cents = costOf("deepseek-flash", { inputTokens: 1_000_000, outputTokens: 0 }, false);
+    expect(cents).toBeCloseTo(100, 6);
   });
 
   it("输入输出分别计价", () => {
-    const cents = costOf("claude-sonnet-5", {
-      inputTokens: 1_000_000,
-      outputTokens: 1_000_000,
-    });
-    expect(cents).toBeCloseTo(1200, 6);
+    const cents = costOf(
+      "deepseek-flash",
+      {
+        inputTokens: 1_000_000,
+        outputTokens: 1_000_000,
+      },
+      false,
+    );
+    // 空闲：输入未命中 100 分 + 输出 4 元/MTok = 400 分
+    expect(cents).toBeCloseTo(500, 6);
   });
 
   it("未知模型要抛，不许静默按 0 计费", () => {
@@ -27,7 +35,6 @@ describe("costOf", () => {
   it("价目表覆盖本管线用到的全部模型", () => {
     expect(PRICES["deepseek-flash"]).toBeDefined();
     expect(PRICES["deepseek-v4-pro"]).toBeDefined();
-    expect(PRICES["claude-sonnet-5"]).toBeDefined();
   });
 });
 
@@ -42,7 +49,7 @@ describe("TokenLedger", () => {
 
   it("按阶段分组——⑤ 的进度条要显示每阶段花了多少", () => {
     const ledger = new TokenLedger();
-    ledger.record("search", "claude-sonnet-5", { inputTokens: 100, outputTokens: 50 });
+    ledger.record("search", "deepseek-v4-pro", { inputTokens: 100, outputTokens: 50 });
     ledger.record("extract", "deepseek-flash", { inputTokens: 900, outputTokens: 20 });
     const byStage = ledger.byStage();
     expect(byStage.search!.inputTokens).toBe(100);
@@ -98,10 +105,15 @@ describe("TokenLedger.recordFlatCost", () => {
 
   it("和 token 计费并存时两边各算各的", () => {
     const ledger = new TokenLedger();
-    ledger.record("extract", "deepseek-flash", { inputTokens: 1_000_000, outputTokens: 0 });
+    ledger.record(
+      "extract",
+      "deepseek-flash",
+      { inputTokens: 1_000_000, outputTokens: 0 },
+      OFF_PEAK,
+    );
     ledger.recordFlatCost("search", "zhipu:search_std", 0.14);
-    // 15 美分的 token 费 + 0.14 美分的按次费
-    expect(ledger.totalCostCents()).toBeCloseTo(15.14, 9);
+    // 100 分的 token 费（输入全按未命中·空闲）+ 0.14 分的按次费
+    expect(ledger.totalCostCents()).toBeCloseTo(100.14, 9);
     expect(ledger.totals().inputTokens).toBe(1_000_000);
   });
 
@@ -143,5 +155,57 @@ describe("TokenLedger.recordFlatCost", () => {
     ledger.recordFlatCost("search", "zhipu:free", 0);
     expect(ledger.totalCostCents()).toBe(0);
     expect(ledger.byStage().search!.flatCostCents).toBe(0);
+  });
+});
+
+describe("TokenLedger 的峰谷判定", () => {
+  /** 周一 10:00（北京），高峰。 */
+  const PEAK = new Date("2026-09-21T10:00:00+08:00");
+
+  it("高峰记下来的一笔正好是空闲那笔的两倍", () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000 };
+
+    const peak = new TokenLedger();
+    peak.record("draft", "deepseek-v4-pro", usage, PEAK);
+
+    const offPeak = new TokenLedger();
+    offPeak.record("draft", "deepseek-v4-pro", usage, OFF_PEAK);
+
+    expect(peak.totalCostCents()).toBeCloseTo(offPeak.totalCostCents() * 2, 9);
+  });
+
+  it("金额只取决于调用发生的时刻，不取决于结账的时刻", () => {
+    const ledger = new TokenLedger();
+    ledger.record("extract", "deepseek-flash", { inputTokens: 1_000_000, outputTokens: 0 }, PEAK);
+
+    // 无论这个测试在一天里的哪一刻跑，这笔账都是高峰价：判定在记账时就冻住了。
+    expect(ledger.totalCostCents()).toBeCloseTo(200, 9);
+    // 反复结账得到同一个数——不重算，就不会随时间漂。
+    expect(ledger.totalCostCents()).toBe(ledger.totalCostCents());
+  });
+
+  it("同一本账里两笔不同时段的调用各按各的时段计", () => {
+    const usage = { inputTokens: 1_000_000, outputTokens: 0 };
+    const ledger = new TokenLedger();
+    ledger.record("extract", "deepseek-flash", usage, PEAK); // 200 分
+    ledger.record("extract", "deepseek-flash", usage, OFF_PEAK); // 100 分
+    expect(ledger.totalCostCents()).toBeCloseTo(300, 9);
+  });
+
+  it("缓存命中的拆分一路带进账本——命中那笔便宜 50 倍", () => {
+    const hit = new TokenLedger();
+    hit.record(
+      "extract",
+      "deepseek-flash",
+      { inputTokens: 1_000_000, outputTokens: 0, cacheHitTokens: 1_000_000, cacheMissTokens: 0 },
+      OFF_PEAK,
+    );
+    const miss = new TokenLedger();
+    miss.record("extract", "deepseek-flash", { inputTokens: 1_000_000, outputTokens: 0 }, OFF_PEAK);
+
+    expect(hit.totalCostCents()).toBeCloseTo(2, 9);
+    expect(miss.totalCostCents()).toBeCloseTo(hit.totalCostCents() * 50, 9);
+    // token 数不因为拆分而变：inputTokens 始终是总数
+    expect(hit.totals().inputTokens).toBe(1_000_000);
   });
 });

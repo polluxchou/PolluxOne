@@ -16,8 +16,52 @@ describe("extractUsage", () => {
         prompt_tokens: 101,
         completion_tokens: 259,
         completion_tokens_details: { reasoning_tokens: 189 },
+        prompt_cache_hit_tokens: 0,
+        prompt_cache_miss_tokens: 101,
       }),
-    ).toEqual({ inputTokens: 101, outputTokens: 259, reasoningTokens: 189 });
+    ).toEqual({
+      inputTokens: 101,
+      outputTokens: 259,
+      reasoningTokens: 189,
+      cacheHitTokens: 0,
+      cacheMissTokens: 101,
+    });
+  });
+
+  it("命中／未命中照实拆开——命中价便宜 50 倍，丢掉拆分等于全按未命中计", () => {
+    const usage = extractUsage({
+      prompt_tokens: 1000,
+      completion_tokens: 10,
+      prompt_cache_hit_tokens: 960,
+      prompt_cache_miss_tokens: 40,
+    });
+    expect(usage.cacheHitTokens).toBe(960);
+    expect(usage.cacheMissTokens).toBe(40);
+    // prompt_tokens 仍然是总数，不是「除了命中之外的那部分」
+    expect(usage.inputTokens).toBe(1000);
+    expect(usage.cacheHitTokens + usage.cacheMissTokens).toBe(usage.inputTokens);
+  });
+
+  it("没有拆分字段时全记未命中——偏贵的方向才是安全的", () => {
+    const usage = extractUsage({ prompt_tokens: 101, completion_tokens: 2 });
+    expect(usage.cacheHitTokens).toBe(0);
+    expect(usage.cacheMissTokens).toBe(101);
+  });
+
+  it("只给了一半（缺 miss）也当全部未命中——半份拆分不比没有更可信", () => {
+    const usage = extractUsage({ prompt_tokens: 100, prompt_cache_hit_tokens: 100 });
+    expect(usage.cacheHitTokens).toBe(0);
+    expect(usage.cacheMissTokens).toBe(100);
+  });
+
+  it("两者之和对不上 prompt_tokens 时全记未命中", () => {
+    const usage = extractUsage({
+      prompt_tokens: 101,
+      prompt_cache_hit_tokens: 90,
+      prompt_cache_miss_tokens: 5, // 90 + 5 ≠ 101
+    });
+    expect(usage.cacheHitTokens).toBe(0);
+    expect(usage.cacheMissTokens).toBe(101);
   });
 
   it("没有 reasoning 明细时给 0", () => {
@@ -25,6 +69,8 @@ describe("extractUsage", () => {
       inputTokens: 1,
       outputTokens: 2,
       reasoningTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 1,
     });
   });
 
@@ -33,6 +79,8 @@ describe("extractUsage", () => {
       inputTokens: 0,
       outputTokens: 0,
       reasoningTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
     });
   });
 });

@@ -1,19 +1,38 @@
 // pipeline/src/models/deepseek.ts
 import { fetchWithTimeout, requestWithRetry } from "../net/http.js";
 import type { TokenLedger, StageName } from "./ledger.js";
-import type { Usage } from "./pricing.js";
+import { splitInputTokens, type Usage } from "./pricing.js";
 
 interface RawUsage {
   prompt_tokens?: number;
   completion_tokens?: number;
   completion_tokens_details?: { reasoning_tokens?: number };
+  /** DeepSeek 把输入 token 再拆成命中／未命中两栏，两者之和等于 prompt_tokens。 */
+  prompt_cache_hit_tokens?: number;
+  prompt_cache_miss_tokens?: number;
 }
 
+/**
+ * `prompt_tokens` 仍然是输入总数；命中／未命中是它的拆分。
+ *
+ * 拆分不可信（字段缺失、为负、或两者之和对不上总数）时由 `splitInputTokens`
+ * 统一**按全部未命中**兜底——未命中贵 50 倍，偏贵是安全的方向。规则只写在
+ * pricing.ts 一处，这里和 `costOf` 共用，不许各写一份。
+ */
 export function extractUsage(raw: RawUsage | undefined): Required<Usage> {
+  const inputTokens = raw?.prompt_tokens ?? 0;
+  const split = splitInputTokens({
+    inputTokens,
+    cacheHitTokens: raw?.prompt_cache_hit_tokens,
+    cacheMissTokens: raw?.prompt_cache_miss_tokens,
+  });
+
   return {
-    inputTokens: raw?.prompt_tokens ?? 0,
+    inputTokens,
     outputTokens: raw?.completion_tokens ?? 0,
     reasoningTokens: raw?.completion_tokens_details?.reasoning_tokens ?? 0,
+    cacheHitTokens: split.cacheHit,
+    cacheMissTokens: split.cacheMiss,
   };
 }
 

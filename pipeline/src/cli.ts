@@ -217,8 +217,9 @@ export async function briefFromUrl(url: string, argv: string[]): Promise<number>
     return 2;
   } finally {
     // 账单先打出来：管线中途抛错，花掉的 token 一样要给用户看见。
+    // 账本单位是人民币分，除以 100 打成元，和 ④ 确认页上那个 ¥ 是同一个数。
     process.stderr.write(
-      `tokens: ${JSON.stringify(ledger.totals())}  约 ${ledger.totalCostCents().toFixed(2)} 美分\n`,
+      `tokens: ${JSON.stringify(ledger.totals())}  约 ¥${(ledger.totalCostCents() / 100).toFixed(2)}\n`,
     );
   }
 
