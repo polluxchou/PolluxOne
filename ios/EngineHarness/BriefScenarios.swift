@@ -115,5 +115,23 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     report.check(EvidenceFooter(mergedAwayCount: 6).text != nil, "有转载就说明")
     report.check(EvidenceFooter(mergedAwayCount: 0).text == nil, "没转载就整行消失")
 
+    report.section("相机右下角那格")
+    report.check(ScriptSlot(brief: nil).destination == .handOff,
+                 "无稿直接去「交给我」")
+    report.check(ScriptSlot(brief: brief).destination == .review,
+                 "有可审的稿去审稿页")
+    report.check(ScriptSlot(brief: brief).caption.contains("83"),
+                 "有稿时显示秒数", detail: ScriptSlot(brief: brief).caption)
+
+    var running = brief
+    running.status = .researching
+    report.check(ScriptSlot(brief: running).destination == .progress,
+                 "在跑时回等待页，而不是进一个空的审稿页")
+
+    var short = brief
+    short.status = .insufficient
+    report.check(ScriptSlot(brief: short).destination == .insufficient,
+                 "信源不足时去「不建议播」")
+
     return (report.pass, report.fail)
 }
