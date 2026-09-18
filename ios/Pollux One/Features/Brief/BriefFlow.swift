@@ -48,6 +48,14 @@ struct BriefFlow: View {
             }
         }
         .animation(.easeInOut(duration: 0.22), value: screen)
+        // 审稿时把最后一句也删掉，Brief.deletingSentence 会把 status 降成
+        // .insufficient。那一刻这一屏就不该再是审稿页——留在一个空的审稿页
+        // 上，等于让一篇播不了的稿继续看起来像能播。
+        .onChange(of: brief?.status) { _, status in
+            if status == .insufficient, screen == .review {
+                screen = .insufficient
+            }
+        }
         .task { loadFixture() }
         // 定时器挂在屏上而不是挂在对象上：离开等待页，结构化并发自己把它取消，
         // 不必再记得去 invalidate 一个还攥在手里的 Timer。
@@ -127,16 +135,18 @@ struct BriefFlow: View {
             }
 
         case .review:
-            if let brief {
+            // Binding($brief) 把 Binding<Brief?> 收成 Binding<Brief>?，
+            // 于是删句能写回这里，而不是死在 ReviewView 自己的副本里。
+            if let bound = Binding($brief) {
                 ReviewView(
-                    brief: brief,
+                    brief: bound,
                     // 开拍就是回相机——它一直在下面开着，这里只是把这一层收掉。
                     // 提词器要等 Brief 真的能变成一篇 Script 才有东西可放，那是
                     // 管线那一段的事；现在按下去得到的是一台干净的相机。
                     onRecord: { screen = .camera },
                     onSwitchScript: { screen = .scripts }
                 )
-                .id(brief.id)
+                .id(bound.wrappedValue.id)
             } else {
                 missing
             }

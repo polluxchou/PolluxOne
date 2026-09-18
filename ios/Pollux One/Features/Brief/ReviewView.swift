@@ -3,7 +3,11 @@ import SwiftUI
 /// ② 当前稿件详情 = 审稿。spec §9.2 ②：一个 View 两个入口
 /// （相机进 / 调研完成落回），不是两屏。
 struct ReviewView: View {
-    @State var brief: Brief
+    /// 绑定而不是 @State：删句要传回 BriefFlow。持一份局部副本的话，
+    /// 删除会在离开这一屏时无声丢失，而且把整篇删空时算出的
+    /// `status = .insufficient` 没有人读得到——空稿仍旧标着「可播」，
+    /// 正是 Brief.deletingSentence 那条断言要防的状态。
+    @Binding var brief: Brief
     let onRecord: () -> Void
     let onSwitchScript: () -> Void
 

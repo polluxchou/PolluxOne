@@ -77,6 +77,20 @@ struct ScriptListView: View {
                 }
             }
             .navigationTitle("Pollux One")
+            // 已经有一篇稿的人，此前没有任何办法再起一篇：相机那一格看到有稿
+            // 就直奔详情，而「交给我」只在这个列表的**空**状态里露面。所以
+            // ③④⑤⑥ 那条链整个没有入口——不是演示的问题，真实管线接上之后
+            // 一样堵着。创建是低频动作，放在这个低频列表的工具栏里，不去挤
+            // 主路径（spec §9.2 ②：低频的东西不该挡高频的路）。
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        onOpen(.handOff)
+                    } label: {
+                        Label("交给我", systemImage: "plus")
+                    }
+                }
+            }
             .task { await viewModel.onAppear() }
         }
     }
