@@ -2855,8 +2855,8 @@ Expected: FAIL，报 `Failed to resolve import "../src/dedupe/union-find.js"`
  * `independence.ts` 把转载并成一个信源，`merge.ts` 把重复的事实并成一条 claim。
  *
  * `groups()` 按**每组最小成员**的顺序返回，组内也升序——两个调用方都要
- * 稳定的输出顺序（`merge.ts` 用它给 claim 编号），所以顺序是接口的一部分，
- * 不是实现细节。
+ * 稳定的输出顺序（`merge.ts` 用它给 claim 编号，而 fixture 里的 draft
+ * 按名字引用 c0/c1/c2），所以顺序是接口的一部分，不是实现细节。
  */
 export interface UnionFind {
   union(a: number, b: number): void;
