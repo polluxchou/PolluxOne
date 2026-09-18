@@ -93,3 +93,86 @@ test("a numeric conflict overrides independence entirely", () => {
   expect(out[0]!.conflictsWith).toEqual(["c1"]);
   expect(out[1]!.conflictsWith).toEqual(["c0"]);
 });
+
+// —— ⑤ 的语义那一半：数字上看不出来的矛盾，由外部（模型）判完喂进来 ——
+
+/** 三家都在说、数字完全对不上的两条：不给 externalConflicts 时谁也不冲突。 */
+function semanticPair(): { claims: MergedClaim[]; facts: Fact[]; sources: Source[] } {
+  return {
+    claims: [
+      { ...claim("c0", ["f0", "f1", "f2"]), text: "央行明确否认将要降准" },
+      { ...claim("c1", ["f0", "f1", "f2"]), text: "消息人士称降准已成定局" },
+    ],
+    facts: [fact("f0", "s0"), fact("f1", "s1"), fact("f2", "s2")],
+    sources: [src("s0", "pbc"), src("s1", "reuters"), src("s2", "caixin")],
+  };
+}
+
+test("an externally judged conflict marks both claims conflicted", () => {
+  // 这一对一个数字都没有，findNumericConflicts 永远判不出来。没有这个入口，
+  // 「官方否认」和「已成定局」会一起进稿——那正好摧毁产品唯一的承诺。
+  const { claims, facts, sources } = semanticPair();
+  expect(classifyClaims(claims, facts, sources).map((c) => c.confidence))
+    .toEqual(["strong", "strong"]);
+
+  const out = classifyClaims(claims, facts, sources, {}, [["c0", "c1"]]);
+  // 走的必须是和数字冲突同一条路：conflictsWith 填上了，confidence 也得跟着
+  // 落到 conflicted——只填前者而仍标 strong 的话，这条照样会被播出去。
+  expect(out.map((c) => c.confidence)).toEqual(["conflicted", "conflicted"]);
+  expect(out[0]!.conflictsWith).toEqual(["c1"]);
+  expect(out[1]!.conflictsWith).toEqual(["c0"]);
+});
+
+test("a pair judged twice, once in each direction, is still one conflict", () => {
+  // 无序对：[a,b] 和 [b,a] 是同一对。不去重的话 conflictsWith 会变成
+  // ["c1","c1"]——下游把它当「和谁打架」的清单印出来，会重复一遍。
+  const { claims, facts, sources } = semanticPair();
+  const out = classifyClaims(claims, facts, sources, {}, [["c0", "c1"], ["c1", "c0"]]);
+  expect(out[0]!.conflictsWith).toEqual(["c1"]);
+  expect(out[1]!.conflictsWith).toEqual(["c0"]);
+});
+
+test("a pair both layers catch is counted once, not twice", () => {
+  // 数字层已经判出来的对照样会被送去问模型（pairsToCheck 的 alreadyKnown 是
+  // 可选的），所以两层同时命中同一对是常态，不是异常。
+  const sources = [src("s0", "pbc"), src("s1", "reuters"), src("s2", "caixin")];
+  const facts = [fact("f0", "s0"), fact("f1", "s1"), fact("f2", "s2")];
+  const claims: MergedClaim[] = [
+    { ...claim("c0", ["f0", "f1", "f2"]), text: "涉及金额约 23 亿美元" },
+    { ...claim("c1", ["f0", "f1", "f2"]), text: "涉及金额约 31 亿美元" },
+  ];
+  const out = classifyClaims(claims, facts, sources, {}, [["c1", "c0"]]);
+  expect(out.map((c) => c.confidence)).toEqual(["conflicted", "conflicted"]);
+  expect(out[0]!.conflictsWith).toEqual(["c1"]);
+  expect(out[1]!.conflictsWith).toEqual(["c0"]);
+});
+
+test("an external conflict does not replace the numeric layer", () => {
+  // 合并不是替换：喂进来一对无关的语义冲突，数字那一对照样要被判出来。
+  const sources = [src("s0", "pbc"), src("s1", "reuters"), src("s2", "caixin")];
+  const facts = [fact("f0", "s0"), fact("f1", "s1"), fact("f2", "s2")];
+  const claims: MergedClaim[] = [
+    { ...claim("c0", ["f0", "f1", "f2"]), text: "涉及金额约 23 亿美元" },
+    { ...claim("c1", ["f0", "f1", "f2"]), text: "涉及金额约 31 亿美元" },
+    { ...claim("c2", ["f0", "f1", "f2"]), text: "央行明确否认将要降准" },
+    { ...claim("c3", ["f0", "f1", "f2"]), text: "消息人士称降准已成定局" },
+  ];
+  const out = classifyClaims(claims, facts, sources, {}, [["c2", "c3"]]);
+  expect(out.map((c) => c.confidence))
+    .toEqual(["conflicted", "conflicted", "conflicted", "conflicted"]);
+  expect(out[0]!.conflictsWith).toEqual(["c1"]);
+  expect(out[2]!.conflictsWith).toEqual(["c3"]);
+});
+
+test("an empty external list is the same as not passing one at all", () => {
+  // 默认参数必须让老行为一字不变，否则所有下游调用方都在悄悄换语义。
+  const sources = [src("s0", "pbc"), src("s1", "reuters"), src("s2", "caixin")];
+  const facts = [fact("f0", "s0"), fact("f1", "s1"), fact("f2", "s2")];
+  const claims: MergedClaim[] = [
+    { ...claim("c0", ["f0", "f1", "f2"]), text: "涉及金额约 23 亿美元" },
+    { ...claim("c1", ["f0", "f1", "f2"]), text: "涉及金额约 31 亿美元" },
+    { ...claim("c2", ["f0", "f1", "f2"]), text: "降准落地后信贷投放节奏将有所前移" },
+  ];
+  expect(classifyClaims(claims, facts, sources, {}, []))
+    .toEqual(classifyClaims(claims, facts, sources));
+});

@@ -116,3 +116,21 @@ test("a fabricated fact sentence is caught", () => {
     problems: [{ kind: "fact-without-claim", sentenceIndex: 3 }],
   });
 });
+
+test("externalConflicts reaches the conflict graph", () => {
+  // 没有这一条，`CoreInput.externalConflicts` 接了字段却不往下传（或者传错
+  // 参数位）不会有任何测试变红——⑤ 的语义那一半就又成了死代码。
+  const brief = sufficient();
+  const [a, b] = buildBrief(brief).claims.filter((c) => c.confidence === "strong");
+  expect(a).toBeDefined();
+  expect(b).toBeDefined();
+
+  brief.externalConflicts = [[a!.id, b!.id]];
+  const claims = buildBrief(brief).claims;
+  const byId = new Map(claims.map((c) => [c.id, c]));
+  expect(byId.get(a!.id)!.confidence).toBe("conflicted");
+  expect(byId.get(b!.id)!.confidence).toBe("conflicted");
+
+  // 四条 strong 打掉两条只剩两条，低于三条的下限——⑥ 跟着改判，不敢播。
+  expect(buildBrief(brief).selection.verdict).toBe("insufficient");
+});

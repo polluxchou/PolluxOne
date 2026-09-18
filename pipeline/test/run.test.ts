@@ -176,4 +176,129 @@ describe("runPipeline", () => {
     );
     expect(readArticle).toHaveBeenCalledTimes(2);
   });
+
+  // —— ⑤ 的语义那一半：模型判出来的冲突对到底有没有进内核 ——
+
+  /** 五件事，多到杀掉一对之后还剩得下三条 strong。 */
+  const FIVE = [
+    ...SHARED,
+    "公开市场单日净投放三千亿元",
+    "七天逆回购利率按兵不动",
+  ];
+
+  const fiveBody = (filler: string) => `${filler}${FIVE.join("。")}。`;
+
+  const fiveFacts = (source: { id: string }) =>
+    Promise.resolve(
+      FIVE.map((text, i) => ({ id: `${source.id}-f${i}`, sourceId: source.id, text, quote: text })),
+    );
+
+  /** 三家独立媒体，正文各自带一段独有内容，否则会被判成同一份稿的转载。 */
+  const threeOutlets = (make: (filler: string) => string) =>
+    vi
+      .fn()
+      .mockResolvedValueOnce(article(make(FILLER_A), "https://a.com/1"))
+      .mockResolvedValueOnce(article(make(FILLER_B), "https://b.com/1"))
+      .mockResolvedValueOnce(article(make(FILLER_C), "https://c.com/1"));
+
+  it("模型判出来的冲突对进得了内核，成稿看到的就是标好的那一份", async () => {
+    // 端口以前定义了却从没被调用过，判出来的对无处可去。没有这一条，把
+    // findSemanticConflicts 的结果整个丢掉不会有任何测试变红——而那正是
+    // 「官方否认降准」和「消息人士称降准已定」一起进稿的那个洞。
+    const findSemanticConflicts = vi
+      .fn()
+      .mockImplementation((claims: { id: string }[]) =>
+        Promise.resolve([[claims[0]!.id, claims[1]!.id]]),
+      );
+
+    // ⑦ 拿到的是全部 claim，由它自己（cli.ts 里的 allowed）挑掉 conflicted 的。
+    // 这里记下它看到的那一份，用来确认标记发生在成稿**之前**。
+    const seenByDraft: { id: string; confidence: string }[] = [];
+    const draftScript = vi
+      .fn()
+      .mockImplementation((claims: { id: string; confidence: string }[]) => {
+        seenByDraft.push(...claims);
+        return Promise.resolve([
+          { text: "先说一句钩子。", kind: "transition", claimIds: [] },
+          ...claims
+            .filter((c) => c.confidence !== "conflicted")
+            .map((c) => ({ text: `${c.id} 的事实句。`, kind: "fact", claimIds: [c.id] })),
+        ]);
+      });
+
+    const result = await runPipeline(
+      "https://a.com/1",
+      OPTIONS,
+      ports({
+        readArticle: threeOutlets(fiveBody),
+        findSources: vi.fn().mockResolvedValue(["https://b.com/1", "https://c.com/1"]),
+        extractFacts: vi.fn().mockImplementation(fiveFacts),
+        findSemanticConflicts,
+        draftScript,
+      }),
+    );
+
+    expect(findSemanticConflicts).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    // 这两条数字上完全看不出矛盾，只有模型判得出来。
+    const conflicted = result.core.claims.filter((c) => c.confidence === "conflicted");
+    expect(conflicted).toHaveLength(2);
+    expect(conflicted[0]!.conflictsWith).toEqual([conflicted[1]!.id]);
+    expect(conflicted[1]!.conflictsWith).toEqual([conflicted[0]!.id]);
+
+    // 成稿拿到的那一份必须已经标好：⑦ 若看到的是判冲突之前的 claims，
+    // 打架的两条会一起写进稿子，这一层就等于没做。
+    expect(seenByDraft.filter((c) => c.confidence === "conflicted")).toHaveLength(2);
+    expect(result.core.bind.ok).toBe(true);
+  });
+
+  it("语义冲突把最后几条 strong 打掉时，最贵的那一步照样不花", async () => {
+    // 三条 claim 杀掉一对只剩一条 strong——「敢说这条别播」在语义这一层
+    // 同样成立，而且必须在成稿之前生效。
+    const draftScript = vi.fn();
+    const result = await runPipeline(
+      "https://a.com/1",
+      OPTIONS,
+      ports({
+        readArticle: threeOutlets(body),
+        findSources: vi.fn().mockResolvedValue(["https://b.com/1", "https://c.com/1"]),
+        extractFacts: vi.fn().mockImplementation(sharedFacts),
+        findSemanticConflicts: vi
+          .fn()
+          .mockImplementation((claims: { id: string }[]) =>
+            Promise.resolve([[claims[0]!.id, claims[1]!.id]]),
+          ),
+        draftScript,
+      }),
+    );
+
+    expect(result.status).toBe("insufficient");
+    expect(draftScript).not.toHaveBeenCalled();
+  });
+
+  it("本来就攒不出三条 strong 时连问都不问——冲突只会让 strong 更少", async () => {
+    // 判冲突也是一次模型调用。此刻就出不了稿的，带上语义冲突之后同样出不了。
+    const findSemanticConflicts = vi.fn().mockResolvedValue([]);
+    await runPipeline(
+      "https://a.com/1",
+      OPTIONS,
+      ports({
+        readArticle: vi
+          .fn()
+          .mockResolvedValueOnce(article("甲报道：降准 0.5 个百分点。", "https://a.com/1"))
+          .mockResolvedValueOnce(article("乙报道：新增贷款 1 万亿元。", "https://b.com/1"))
+          .mockResolvedValueOnce(article("丙报道：存款利率下调 10 个基点。", "https://c.com/1")),
+        findSources: vi.fn().mockResolvedValue(["https://b.com/1", "https://c.com/1"]),
+        extractFacts: vi.fn().mockImplementation((source: { id: string; body: string }) =>
+          Promise.resolve([
+            { id: `${source.id}-f0`, sourceId: source.id, text: source.body, quote: source.body },
+          ]),
+        ),
+        findSemanticConflicts,
+      }),
+    );
+    expect(findSemanticConflicts).not.toHaveBeenCalled();
+  });
 });

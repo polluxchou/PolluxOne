@@ -30,14 +30,11 @@ export interface Ports {
   findSources: (headline: string) => Promise<string[]>;
   extractFacts: (source: Source) => Promise<Fact[]>;
   /**
-   * ⑤ 的语义一半。**目前还没有接进来**：`buildBrief` 只收 sources / facts /
-   * draft，冲突图是 `classifyClaims` 内部靠 `findNumericConflicts` 自己算的，
-   * 没有任何入口能把模型判出来的这几对喂进去。
+   * ⑤ 的语义一半：数字上看不出来的矛盾——「官方否认将要降准」对「消息人士
+   * 称降准已定」，两句话一个数字都没有，`findNumericConflicts` 永远判不出来。
    *
-   * 端口留在这里是为了记着这个缺口，而不是假装它接好了。真要接通，得让内核
-   * 多收一个「外部冲突对」参数——那是内核的设计变更，不在本任务范围内。
-   * 在那之前宁可不调用它：调了也只能丢掉，白花一次模型钱，还会让人以为
-   * 语义冲突已经在把关了。
+   * 判定结果经 `CoreInput.externalConflicts` 并回内核的冲突图，和代码判出来的
+   * 数字冲突**合并**。判决权仍在代码：模型只回一个二分类。
    */
   findSemanticConflicts: (claims: MergedClaim[]) => Promise<Pair[]>;
   draftScript: (
@@ -117,45 +114,51 @@ export async function runPipeline(
     };
   }
 
-  // ④⑤⑥⑧⑨ 全部是已建成的确定性内核，这里只是喂给它。
-  // 第一次传空 draft 是安全的：draft 为空时 bindEvidence 返回 ok 且 evidence 为空，
-  // selectClaims 也只在 factSlots 非法时抛，而 estimateBrief 保证 factSlots ≥ 3。
-  // 拿的就是它的 claims——⑦ 除了这些 claim 之外不许看到任何别的东西。
-  const core = buildBrief({
+  // ④⑤⑥⑧⑨ 全部是已建成的确定性内核，这里只是喂给它。内核是纯函数、不花
+  // 一分钱，所以下面跑了三遍——每一遍手上多知道一件事，重算一遍都比维护一条
+  // 「只补这一步」的旁路便宜。真正要计次的是夹在中间的那两次模型调用。
+  const base = {
     durationSec: options.durationSec,
     register: options.register,
     charsPerSecond: options.charsPerSecond,
     sources,
     facts,
-    draft: [],
+  };
+
+  // 源数够了不等于敢播：三篇报道也可能一条 strong 都攒不出来。这是真正决定
+  // 「敢不敢播」的那一关，源数只是它的前哨。
+  const insufficient = (core: CoreResult): RunResult => ({
+    status: "insufficient",
+    sources,
+    rejectedQuotes,
+    core,
+    reason: `只有 ${core.selection.strongFound ?? 0} 条说法有足够的独立信源支撑，写不出一篇敢播的稿`,
   });
 
-  if (core.selection.verdict === "insufficient") {
-    // 源数够了不等于敢播：三篇报道也可能一条 strong 都攒不出来。
-    // 上面那条理由在这里同样成立，所以这一步也排在成稿之前——而且这是
-    // 真正决定「敢不敢播」的那一关，源数只是它的前哨。
-    return {
-      status: "insufficient",
-      sources,
-      rejectedQuotes,
-      core,
-      reason: `只有 ${core.selection.strongFound ?? 0} 条说法有足够的独立信源支撑，写不出一篇敢播的稿`,
-    };
-  }
+  // 第一遍只为拿 claims：⑤ 的语义一半要有成形的 claim 才问得了模型。
+  // 传空 draft 是安全的：draft 为空时 bindEvidence 返回 ok 且 evidence 为空，
+  // selectClaims 也只在 factSlots 非法时抛，而 estimateBrief 保证 factSlots ≥ 3。
+  const preSemantic = buildBrief({ ...base, draft: [] });
+  // 这一关排在问模型之前，理由是单向的：冲突只会让 strong 变少、不会变多，
+  // 所以此刻就写不出稿的，带上语义冲突之后同样写不出——那笔钱不必花。
+  if (preSemantic.selection.verdict === "insufficient") return insufficient(preSemantic);
+
+  // ⑤ 的语义一半。判出来的对并回内核的冲突图，和数字那一层合并。
+  const externalConflicts = await ports.findSemanticConflicts(preSemantic.claims);
+
+  // 带着语义冲突再跑一遍。**成稿必须用这一份 claims**：⑦ 拿到的若是第一遍的
+  // 结果，互相矛盾的两条会一起写进稿子，⑤ 的语义那一半就等于没做。
+  const checked = buildBrief({ ...base, draft: [], externalConflicts });
+  // 语义冲突可能正好把最后几条 strong 打掉。那就依然不敢播，成稿照样不花。
+  if (checked.selection.verdict === "insufficient") return insufficient(checked);
 
   // ⑦ 成稿——唯一一步「前面都成立才值得花」的调用。
-  const draft = await ports.draftScript(core.claims, options.durationSec, options.register);
+  // ⑦ 除了这些 claim 之外不许看到任何别的东西。
+  const draft = await ports.draftScript(checked.claims, options.durationSec, options.register);
 
-  // 再跑一遍内核，这次带上稿子：⑧ 的挂信源要拿 draft 才做得了。
-  // 内核是纯函数、不花一分钱，重算一遍比维护一条「只补 bind」的旁路便宜。
-  const final = buildBrief({
-    durationSec: options.durationSec,
-    register: options.register,
-    charsPerSecond: options.charsPerSecond,
-    sources,
-    facts,
-    draft,
-  });
+  // 最后一遍带上稿子：⑧ 的挂信源要拿 draft 才做得了。冲突图要跟着一起带，
+  // 否则最终结果里那几条语义矛盾的 claim 会重新变回 strong。
+  const final = buildBrief({ ...base, draft, externalConflicts });
 
   return { status: "ok", sources, rejectedQuotes, core: final };
 }

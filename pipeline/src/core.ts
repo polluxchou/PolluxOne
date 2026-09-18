@@ -2,7 +2,7 @@ import { classifyClaims } from "./dedupe/classify.js";
 import { mergeFacts } from "./dedupe/merge.js";
 import { estimateBrief, type BriefEstimate } from "./domain/estimate.js";
 import { breathMarks, estimateSeconds, type BreathMark } from "./domain/prosody.js";
-import type { DraftSentence, Fact, Source, VerifiedClaim } from "./domain/types.js";
+import type { ClaimId, DraftSentence, Fact, Source, VerifiedClaim } from "./domain/types.js";
 import { bindEvidence, type BindResult } from "./draft/bind.js";
 import { selectClaims, type Selection } from "./draft/select.js";
 
@@ -16,6 +16,12 @@ export interface CoreInput {
   /** ⑦ 成稿的输出。本计划不产生它，由 fixture 提供。 */
   draft: DraftSentence[];
   mediaGroups?: Record<string, string>;
+  /**
+   * ⑤ 语义那一半的判定结果：数字上看不出来、只有模型判得了的矛盾对。
+   * 内核自己算不出它，也不去算——它只把这些对并进 `classifyClaims` 的冲突图。
+   * 不传等同于只有数字冲突那一层。
+   */
+  externalConflicts?: readonly (readonly [ClaimId, ClaimId])[];
 }
 
 export interface CoreResult {
@@ -35,7 +41,13 @@ export function buildBrief(input: CoreInput): CoreResult {
   const estimate = estimateBrief(input.durationSec, input.register);
 
   const merged = mergeFacts(input.facts);
-  const claims = classifyClaims(merged, input.facts, input.sources, input.mediaGroups);
+  const claims = classifyClaims(
+    merged,
+    input.facts,
+    input.sources,
+    input.mediaGroups,
+    input.externalConflicts,
+  );
   const selection = selectClaims(claims, estimate.factSlots);
 
   // 即便 insufficient 也照样跑绑定与时长：问题要浮出来，不能被一个 verdict 盖掉。

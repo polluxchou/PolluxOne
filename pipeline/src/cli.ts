@@ -139,8 +139,8 @@ export function livePorts(config: Config, ledger: TokenLedger): Ports {
       ),
 
     findSemanticConflicts: async (claims) => {
-      // 内核目前收不下这个结果（见 run.ts 里 Ports 上的注释），所以这一支
-      // 还没有调用方。实现照样写在这里：缺口在接线上，不在这一步本身。
+      // 判决权在代码：模型只回一个二分类，冲突图由 parseConflictReply 构造，
+      // 再由 runPipeline 经 CoreInput.externalConflicts 并进内核的冲突图。
       const pairs = pairsToCheck(claims);
       if (pairs.length === 0) return [];
       const reply = await deepseek.json<ConflictReply>(
