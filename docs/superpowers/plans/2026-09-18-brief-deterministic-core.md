@@ -1804,17 +1804,21 @@ git commit -m "Pick which claims earn a place in eighty seconds"
 ```ts
 import { expect, test } from "vitest";
 import type { DraftSentence } from "../src/domain/types.js";
-import { bindEvidence, sentenceFingerprint } from "../src/draft/bind.js";
+import { bindEvidence, sentenceFingerprint, type BindResult } from "../src/draft/bind.js";
 
 const VERIFIED = ["c0", "c1"];
+
+/** 窄化到成功分支，失败时给出看得懂的报错。 */
+function ok(result: BindResult) {
+  if (!result.ok) throw new Error(`expected a clean bind, got ${JSON.stringify(result.problems)}`);
+  return result;
+}
 
 test("a fact sentence gets its claims bound and a fingerprint", () => {
   const draft: DraftSentence[] = [
     { text: "此次降准释放长期资金约 1 万亿元。", kind: "fact", claimIds: ["c0"] },
   ];
-  const out = bindEvidence(draft, VERIFIED);
-  expect(out.ok).toBe(true);
-  expect(out.problems).toEqual([]);
+  const out = ok(bindEvidence(draft, VERIFIED));
   expect(out.evidence).toEqual([
     {
       sentenceIndex: 0,
@@ -1828,35 +1832,41 @@ test("a fact sentence with no claims is rejected — the model made it up", () =
   const draft: DraftSentence[] = [
     { text: "业内普遍认为这是重大利好。", kind: "fact", claimIds: [] },
   ];
-  const out = bindEvidence(draft, VERIFIED);
-  expect(out.ok).toBe(false);
-  expect(out.problems).toEqual([{ sentenceIndex: 0, kind: "fact-without-claim" }]);
+  // 整体比对：失败时连 evidence 和 sentences 都不该有
+  expect(bindEvidence(draft, VERIFIED)).toEqual({
+    ok: false,
+    problems: [{ kind: "fact-without-claim", sentenceIndex: 0 }],
+  });
 });
 
 test("a claim that never passed verification is rejected", () => {
   const draft: DraftSentence[] = [
     { text: "此次降准释放长期资金约 1 万亿元。", kind: "fact", claimIds: ["c9"] },
   ];
-  const out = bindEvidence(draft, VERIFIED);
-  expect(out.ok).toBe(false);
-  expect(out.problems).toEqual([{ sentenceIndex: 0, kind: "unknown-claim", claimId: "c9" }]);
+  expect(bindEvidence(draft, VERIFIED)).toEqual({
+    ok: false,
+    problems: [{ kind: "unknown-claim", sentenceIndex: 0, claimId: "c9" }],
+  });
 });
 
 test("an opinion sentence carrying claims has them stripped, not rejected", () => {
   const draft: DraftSentence[] = [
     { text: "我的判断是这一轮宽松还没到头。", kind: "opinion", claimIds: ["c0"] },
   ];
-  const out = bindEvidence(draft, VERIFIED);
-  expect(out.ok).toBe(true);
+  const out = ok(bindEvidence(draft, VERIFIED));
   expect(out.sentences[0]!.claimIds).toEqual([]);
   expect(out.evidence).toEqual([]);
 });
 
-test("a transition sentence needs no claims", () => {
+test("a transition sentence has its claims stripped too", () => {
+  // 原来这条的 claimIds 本来就是空的，等于没验证「剥离」这件事——
+  // 把剥离的条件从 `kind !== "fact"` 缩成 `kind === "opinion"` 也不会红。
   const draft: DraftSentence[] = [
-    { text: "央行今天突然出手了。", kind: "transition", claimIds: [] },
+    { text: "央行今天突然出手了。", kind: "transition", claimIds: ["c0"] },
   ];
-  expect(bindEvidence(draft, VERIFIED).ok).toBe(true);
+  const out = ok(bindEvidence(draft, VERIFIED));
+  expect(out.sentences[0]!.claimIds).toEqual([]);
+  expect(out.evidence).toEqual([]);
 });
 
 test("every problem in a draft is reported, not just the first", () => {
@@ -1865,7 +1875,8 @@ test("every problem in a draft is reported, not just the first", () => {
     { text: "二。", kind: "fact", claimIds: ["c9"] },
   ];
   const out = bindEvidence(draft, VERIFIED);
-  expect(out.problems).toHaveLength(2);
+  expect(out.ok).toBe(false);
+  if (!out.ok) expect(out.problems).toHaveLength(2);
 });
 
 test("the fingerprint changes when the wording changes", () => {
@@ -1876,6 +1887,11 @@ test("the fingerprint changes when the wording changes", () => {
 
 test("the fingerprint ignores punctuation, so a comma edit keeps the sources", () => {
   expect(sentenceFingerprint("降准，三月生效。")).toBe(sentenceFingerprint("降准三月生效"));
+});
+
+test("the fingerprint is sixteen hex characters", () => {
+  // 没这一条，把 slice(0, 16) 改成 slice(0, 8) 不会有任何测试变红。
+  expect(sentenceFingerprint("降准三月生效")).toMatch(/^[0-9a-f]{16}$/);
 });
 ```
 
@@ -1898,31 +1914,40 @@ import { createHash } from "node:crypto";
 import { normalize } from "../dedupe/shingle.js";
 import type { ClaimId, DraftSentence } from "../domain/types.js";
 
-export type BindProblemKind = "fact-without-claim" | "unknown-claim";
-
-export interface BindProblem {
-  sentenceIndex: number;
-  kind: BindProblemKind;
-  claimId?: ClaimId;
-}
+/** 判别联合：`fact-without-claim` 永远没有 claimId，`unknown-claim` 永远有。 */
+export type BindProblem =
+  | { kind: "fact-without-claim"; sentenceIndex: number }
+  | { kind: "unknown-claim"; sentenceIndex: number; claimId: ClaimId };
 
 export interface EvidenceRow {
+  /**
+   * **这是快照序号，不是稳定外键。** 它只在传进来的那个 draft 数组里有效。
+   * spec §8.1 的审稿页允许逐句删除，删掉一句之后其后每一行的下标都会挪位——
+   * 指纹防的是 Safe Word 当场改写，**不防删除**（spec §9.2 ③ 自己也把
+   * 「审稿时删句要清理孤儿 evidence」单列成一条）。下一个计划落库时必须给
+   * 句子一个稳定 id，别把这个字段当外键用。
+   */
   sentenceIndex: number;
   claimIds: ClaimId[];
   sentenceFingerprint: string;
 }
 
-export interface BindResult {
-  ok: boolean;
-  problems: BindProblem[];
-  evidence: EvidenceRow[];
-  /** opinion 句的 claimIds 已剥离 */
-  sentences: DraftSentence[];
-}
+/**
+ * 失败时**不返回** evidence 和 sentences——不是省事，是让「忘了检查 ok 就去用
+ * evidence」在类型上不可能发生。那正好是这个函数存在的理由的反面：把没通过
+ * 校验的绑定挂到句子上。
+ */
+export type BindResult =
+  | { ok: true; evidence: EvidenceRow[]; sentences: DraftSentence[] }
+  | { ok: false; problems: BindProblem[] };
 
 /**
  * 句子的内容指纹。标点和空白不计入——录制中 Safe Word 只改个逗号不该让信源掉，
  * 改了数字就必须掉。spec §9.2 ③。
+ *
+ * 只取 16 个十六进制字符（64 位）是够的：这不是一个要和几百万条比对的内容
+ * 索引，而是「这一行的当前文本还等于记录时的那份吗」这样一次成对比较。
+ * 别看见截断就去改成整串。
  */
 export function sentenceFingerprint(text: string): string {
   return createHash("sha256").update(normalize(text)).digest("hex").slice(0, 16);
@@ -1948,14 +1973,14 @@ export function bindEvidence(draft: DraftSentence[], verifiedClaimIds: ClaimId[]
     }
 
     if (sentence.claimIds.length === 0) {
-      problems.push({ sentenceIndex, kind: "fact-without-claim" });
+      problems.push({ kind: "fact-without-claim", sentenceIndex });
       sentences.push(sentence);
       return;
     }
 
     const unknown = sentence.claimIds.filter((id) => !verified.has(id));
     for (const claimId of unknown) {
-      problems.push({ sentenceIndex, kind: "unknown-claim", claimId });
+      problems.push({ kind: "unknown-claim", sentenceIndex, claimId });
     }
     sentences.push(sentence);
     if (unknown.length === 0) {
@@ -1967,7 +1992,10 @@ export function bindEvidence(draft: DraftSentence[], verifiedClaimIds: ClaimId[]
     }
   });
 
-  return { ok: problems.length === 0, problems, evidence, sentences };
+  // 一条问题都没有才算绑成了。半好半坏的绑定不发出去——模型既然已经证明
+  // 它分不清哪些 claim 通过了验证，这一句里"对的那一半"也不值得信。
+  if (problems.length > 0) return { ok: false, problems };
+  return { ok: true, evidence, sentences };
 }
 ```
 
@@ -1977,7 +2005,7 @@ export function bindEvidence(draft: DraftSentence[], verifiedClaimIds: ClaimId[]
 cd pipeline && npx vitest run test/bind.test.ts
 ```
 
-Expected: `8 passed`
+Expected: `9 passed`
 
 - [ ] **Step 5: 提交**
 
@@ -2051,7 +2079,7 @@ test("the estimate travels with the result", () => {
 
 test("binding and prosody still run so problems surface even when insufficient", () => {
   const out = buildBrief(input());
-  expect(out.bind.problems).toEqual([]);
+  expect(out.bind.ok).toBe(true);
   expect(out.seconds).toBeGreaterThan(0);
   expect(out.breaths.length).toBeGreaterThan(0);
 });
@@ -2059,9 +2087,10 @@ test("binding and prosody still run so problems surface even when insufficient",
 test("a fabricated fact sentence is caught", () => {
   const withLie = input();
   withLie.draft.push({ text: "这是年内第三次降准。", kind: "fact", claimIds: [] });
-  const out = buildBrief(withLie);
-  expect(out.bind.ok).toBe(false);
-  expect(out.bind.problems).toEqual([{ sentenceIndex: 3, kind: "fact-without-claim" }]);
+  expect(buildBrief(withLie).bind).toEqual({
+    ok: false,
+    problems: [{ kind: "fact-without-claim", sentenceIndex: 3 }],
+  });
 });
 ```
 
