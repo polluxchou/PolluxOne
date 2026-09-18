@@ -3079,3 +3079,90 @@ Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+---
+
+## Task 18: 让「近 10 次中位」真的有 10 个样本可取
+
+**Files:**
+- Create: `backend/supabase/migrations/0004_reading_rate_samples.sql`
+- Modify: `docs/superpowers/specs/2026-09-17-news-brief-pipeline-design.md`（§7 与 §9）
+
+`0002` 建的 `user_reading_rates` 主键是 `(user_id, language)`——**一个语种只有一行**，
+存 `chars_per_second` + `sample_count`。但 §7 要的是**近 10 次的中位数**，
+一行存不下 10 个样本。于是 `medianRate()` 在真实实现里没有数据来源，
+Task 15 只能先让 `MockBackendClient` 用一个内存数组占位。
+
+**为什么不退回成跑动平均**：中位数存在的唯一理由就是抗住"一次读错稿、中途停顿"
+产生的极端值——平均数会被它拖走。Task 15 有一条测试专门钉这个
+（`medianRate([5,5,5,5,0.5]) === 5`）。改成平均等于把这个保护扔掉，
+然后「按你的语速」会因为一次卡壳而长期偏慢。
+
+**为什么不把 10 个值塞进一个数组列**：窗口大小会变。今天是 10，
+调成 20 或者改成「最近 30 天」都只是换一句 query，而数组列要改表。
+
+- [ ] **Step 1: 写迁移**
+
+```sql
+-- 每次 take 一行。§7 的「近 10 次中位」需要真的有 10 个样本可取，
+-- 而 user_reading_rates 一个语种只有一行。
+create table reading_rate_samples (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  language text not null check (language in ('cjk', 'latin')),
+  chars_per_second real not null check (chars_per_second > 0),
+  recorded_at timestamptz not null default now()
+);
+
+alter table reading_rate_samples enable row level security;
+
+create policy "reading_rate_samples are owner-scoped" on reading_rate_samples
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- 取最近 N 条的查询要走这个索引
+create index reading_rate_samples_recent
+  on reading_rate_samples (user_id, language, recorded_at desc);
+```
+
+`user_reading_rates` **保留**：它现在的角色变成"由样本算出来的缓存值"，
+读取路径可以先看它、缺了再从样本算。不要在这个任务里删它——
+删表是不可逆的，而它现在没有妨碍任何人。
+
+- [ ] **Step 2: 在真 Postgres 上验**
+
+照 Task 17 的做法（`LC_ALL=C initdb --locale=C --encoding=UTF8`，
+先建 `auth` schema 桩——注意桩要写成
+`create table auth.users (id uuid primary key, email text)`，
+少了 `email` 列，`0001` 的 `handle_new_user()` 触发器会在插数据时炸）。
+依次跑 `0001` → `0002` → `0003` → `0004`，必须全部无错。
+
+再插 12 条样本，确认 `order by recorded_at desc limit 10` 取到的是最近 10 条。
+
+- [ ] **Step 3: 改 spec**
+
+§7 写明样本存在 `reading_rate_samples`，`user_reading_rates` 是缓存；
+§9 的数据模型表加上这张表。
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add backend/supabase/migrations/0004_reading_rate_samples.sql docs/superpowers/specs/2026-09-17-news-brief-pipeline-design.md
+git commit -m "$(cat <<'EOF'
+Keep the takes the median is supposed to be taken over
+
+user_reading_rates holds one row per user and language, so the "median of
+the last ten takes" in the spec had nothing to take a median of — Task 15
+could only stand a Mock's in-memory array in that place.
+
+A running average would fit the existing row and is the wrong trade: the
+median is there precisely to survive one take where the reader stumbled,
+and a mean follows that outlier down. One row per take also leaves the
+window size a query rather than a migration.
+
+The old table stays as a cache derived from the samples; dropping it is
+irreversible and it is in nobody's way.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+EOF
+)"
+```
