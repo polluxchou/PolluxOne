@@ -16,8 +16,17 @@ test("punctuation and spaces do not take time to read", () => {
   expect(estimateSeconds("央行，出手。", 5)).toBeCloseTo(estimateSeconds("央行出手", 5), 5);
 });
 
+test("spaces do not take time to read either", () => {
+  // 上一条用的是中文短句，里面根本没有空格——把正则里的 `\s` 删掉也不会红。
+  expect(estimateSeconds("hello world", 5)).toBeCloseTo(estimateSeconds("helloworld", 5), 5);
+});
+
 test("with no rate on file, the language default is used", () => {
-  expect(estimateSeconds("央行今天突然出手了", DEFAULT_CHARS_PER_SECOND.cjk)).toBeCloseTo(9 / 5.5, 5);
+  // 这两个值必须和 iOS 侧 ScriptLanguage.defaultCharactersPerSecond 一致，
+  // 否则 App 告诉用户「83 秒」、提词器却按另一个速度起步。
+  expect(DEFAULT_CHARS_PER_SECOND).toEqual({ cjk: 5, latin: 16 });
+  expect(estimateSeconds("央行今天突然出手了", DEFAULT_CHARS_PER_SECOND.cjk)).toBeCloseTo(9 / 5, 5);
+  expect(estimateSeconds("hello world", DEFAULT_CHARS_PER_SECOND.latin)).toBeCloseTo(10 / 16, 5);
 });
 
 test("a sentence-final stop is a long breath, an internal comma a short one", () => {
