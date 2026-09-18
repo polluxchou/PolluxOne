@@ -49,7 +49,9 @@ struct Brief: Codable, Equatable, Identifiable {
     let pacedToUser: Bool
     var sentences: [BriefSentence]
     var claims: [String: ClaimEvidence]
-    let stages: [BriefStage]
+    /// `var`，只因为等待页要在本地把它一格一格往前推（`advancingStages()`）。
+    /// 阶段是这份数据里唯一随时间变的东西，其余仍然是 `let`。
+    var stages: [BriefStage]
     let budget: TokenBudget
     /// ⑥ 不建议播时的理由，其余状态为 nil。
     let insufficientReason: String?

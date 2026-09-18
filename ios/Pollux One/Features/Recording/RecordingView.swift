@@ -11,9 +11,12 @@ import SwiftUI
 /// both of which land inside the safe-area insets.
 struct RecordingView: View {
     @State private var viewModel: RecordingViewModel
-    /// 可选：相机是根视图，开机时通常没有稿。提词块整块随它隐藏，
-    /// 快门不随它隐藏——没有稿也照样能拍。
+    /// 可选：相机是根视图，开机时通常没有稿。提词块整块随它隐藏。
     let script: Script?
+    /// 右下角那一格要画什么，全由 `ScriptSlot(brief:)` 决定。这里只是把它
+    /// 传进去；相机不认识 Brief 的任何一种状态。
+    let brief: Brief?
+    let onOpenBrief: (BriefScreen) -> Void
 
     @State private var focusPoint: CGPoint?
     @State private var focusHideTask: Task<Void, Never>?
@@ -38,6 +41,10 @@ struct RecordingView: View {
         static let paramsRowBottom: CGFloat = 162
         static let lensSelectorBottom: CGFloat = 112
         static let shutterRowBottom: CGFloat = 24
+        /// 100 + 60pt 高 = 160，正好压在参数行（162）底下一线；镜头药丸是居中的
+        /// 小胶囊，所以这一格靠右放不会碰到它。
+        static let scriptSlotBottom: CGFloat = 100
+        static let scriptSlotTrailing: CGFloat = 20
         /// Above every bottom control, inside the bottom scrim. NOT in the top
         /// HUD: that row is placed to flank the Dynamic Island, which swallows
         /// anything spanning the middle of it.
@@ -49,8 +56,13 @@ struct RecordingView: View {
         static let bottomScrimHeight: CGFloat = 270
     }
 
-    init(script: Script?, sessionManager: SessionManager) {
+    init(script: Script?,
+         sessionManager: SessionManager,
+         brief: Brief? = nil,
+         onOpenBrief: @escaping (BriefScreen) -> Void = { _ in }) {
         self.script = script
+        self.brief = brief
+        self.onOpenBrief = onOpenBrief
         _viewModel = State(initialValue: RecordingViewModel(sessionManager: sessionManager))
     }
 
@@ -283,11 +295,20 @@ struct RecordingView: View {
                 safeWord: "Pollux",
                 facing: viewModel.sessionManager.cameraEngine.configuration.facing,
                 canFlip: viewModel.canFlipCamera,
+                // 无稿时快门不可用。见 ShutterRowView.canRecord——那是一行
+                // 可逆的判断，撤掉它需要先让 SessionManager 支持无稿开拍。
+                canRecord: script != nil,
                 onToggleRecording: { viewModel.toggleRecording() },
                 onFlip: { viewModel.flipCamera() }
             )
             .padding(.horizontal, 32)
             .bottomAnchored(Offset.shutterRowBottom)
+
+            // 右下角那一格：整个 Brief 流程的唯一入口。它在镜头选择那一排的
+            // 右边，够不着快门也够不着参数行——按错一格的代价在这一屏比别处大。
+            ScriptSlotView(slot: ScriptSlot(brief: brief), onTap: onOpenBrief)
+                .bottomTrailingAnchored(bottom: Offset.scriptSlotBottom,
+                                        trailing: Offset.scriptSlotTrailing)
         }
     }
 
@@ -318,6 +339,13 @@ private extension View {
     func bottomAnchored(_ inset: CGFloat) -> some View {
         frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .padding(.bottom, inset)
+    }
+
+    /// `bottom:Npx; right:Npx` —— 两条边同时定住的那一种。
+    func bottomTrailingAnchored(bottom: CGFloat, trailing: CGFloat) -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .padding(.bottom, bottom)
+            .padding(.trailing, trailing)
     }
 
     /// The `top:Npx` counterpart.
