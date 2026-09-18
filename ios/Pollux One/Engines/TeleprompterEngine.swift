@@ -74,6 +74,13 @@ final class TeleprompterEngine {
     /// the reading position alone is only checkable against this number.
     var cursorOffset: Double { pacer.cursor }
 
+    /// 这条 take 读出来的语速，够可信才有值。`SessionManager` 只持有引擎、
+    /// 拿不到 `pacer`，而落库这件事属于会话收尾而不是提词器——所以这里只开
+    /// 一个转发口子，不自己写库。
+    ///
+    /// 读它必须在 `load` 之前：`load` 会换掉整个 pacer，上一条稿的样本就没了。
+    var pacingSample: ReadingPacer.Sample? { pacer.exportSample() }
+
     private var source: PromptScriptText?
     private var sentenceRanges: [Range<Int>] = []
     private var pacer = ReadingPacer(language: .latin)

@@ -152,6 +152,15 @@ final class SessionManager {
         recordingEngine.stopRecording()
         speechService.stop()
         audioLevelMonitor.stopDisplayUpdates()
+        // Read the rate before anything else touches the prompter. Today only
+        // `load` throws the pacer away, so the ordering is not yet load-bearing
+        // — it is written this way so that whatever gets added to this method
+        // later can't silently take the sample with it. `recordReadingRate`
+        // returns immediately; a rate that fails to store must not hold up the
+        // end of a take.
+        if let sample = teleprompterEngine.pacingSample {
+            syncService.recordReadingRate(sample)
+        }
         teleprompterEngine.stopPacing()
         currentRecordingSession?.endedAt = Date()
     }

@@ -18,6 +18,20 @@ protocol BackendClient {
     func updateParagraph(scriptId: UUID, paragraphId: UUID, newText: String) async throws -> Script
 
     func reportReadingProgress(scriptId: UUID, progress: ReadingProgress) async throws
+
+    /// Records what this take was actually read at, into `user_reading_rates`
+    /// (`user_id · language · chars_per_second · sample_count`). One row per
+    /// language per user: Chinese and English differ by more than a factor of
+    /// three, so a single number for a bilingual reader is nobody's rate.
+    ///
+    /// Called once at the end of a take, and only when `ReadingPacer` judged
+    /// the take long enough to have measured anything — see
+    /// `ReadingPacer.exportSample()`.
+    ///
+    /// Until enough of these exist, estimates fall back to the language
+    /// default, and `Brief.pacedToUser` is false so the copy doesn't claim a
+    /// script is paced to a reader it has never heard.
+    func upsertReadingRate(language: ScriptLanguage, charsPerSecond: Double) async throws
 }
 
 enum BackendError: Error {

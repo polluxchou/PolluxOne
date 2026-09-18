@@ -432,5 +432,40 @@ func runPacingSuite() -> (pass: Int, fail: Int) {
     report.check(afterReset.exportSample() == nil,
                  "reset 后重新积累——不能把上一条稿的语速算到这一条头上")
 
+    report.section("引擎把样本转发给收尾流程")
+
+    let forwardingScript = makeLayoutScript([
+        "央行今天突然出手了。市场在开盘前就已经站不住了。交易员说这是三年来最陡的一次。",
+        "债券收益率同步下行。中间价比前一天低了三百个点。外资在离岸市场继续加仓。",
+        "监管层的表态还没有出来。分析师普遍认为下周会有动作。这件事还没有结束。",
+        "第二天的开盘价又低了一截。基金经理开始重新算他们的仓位。没有人愿意先说话。"
+    ])
+    let forwarding = TeleprompterEngine()
+    forwarding.load(script: forwardingScript)
+    forwarding.setLayout(width: 100, measurer: FakeTextMeasurer(em: 10))
+
+    report.check(forwarding.pacingSample == nil,
+                 "刚 load 完没有样本——引擎转发的是 pacer 的判断，不自己编一个")
+
+    // 合成时间，不是 Date()：两次 Date() 可能落在同一瞬间，那一步就不采样了，
+    // 这条 scenario 会变成看运气。
+    let readingStart = Date().timeIntervalSinceReferenceDate
+    for (index, sentence) in forwardingScript.allSentences.enumerated() {
+        var position = makePosition(sentence, tokenIndex: 0, in: forwardingScript)
+        position.updatedAt = Date(timeIntervalSinceReferenceDate: readingStart + Double(index) * 2.0)
+        forwarding.update(position: position)
+    }
+
+    report.check(forwarding.pacingSample != nil,
+                 "读完一条稿，SessionManager 就能拿到样本去落库——它够不着 pacer")
+    report.check(forwarding.pacingSample?.language == .cjk,
+                 "语种跟着稿子走，因为中英文字符/秒差三倍以上")
+    report.check((forwarding.pacingSample?.charsPerSecond ?? 0) > 0,
+                 "语速为正", detail: "\(forwarding.pacingSample?.charsPerSecond ?? -1)")
+
+    forwarding.load(script: forwardingScript)
+    report.check(forwarding.pacingSample == nil,
+                 "重新 load 会换掉整个 pacer——所以 endTake() 要先读样本")
+
     return (report.pass, report.fail)
 }
