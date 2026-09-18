@@ -167,6 +167,20 @@ Pollux One 有一件别人做不到的事：**出稿之后不断档**。稿子�
 
 归并后每个 Claim 得到一个 `independence`：互不相关的 Source 组数量。
 
+**归并的同时必须留下 `merged_away_count`**——被判为转载而归并掉的篇数。归并是有损
+操作，只保留 `independence` 就等于把这个数扔了，而它正是用户在审稿页看到的第二个
+数字：
+
+> 3 个独立信源
+>
+> 另有 6 篇为上述稿件转载，未计入
+
+两个数要分开存、分开显示。合并成一个就只剩上面那行，用户无从知道我们到底看过多少
+篇、剔掉了多少篇——而「剔掉了 6 篇」本身就是可信度的证据。反过来，把两者相加
+（3 + 6 = 9 个源）恰恰是本设计最怕的那种误读，也正是 §5 开头那句"5 家门户转载不是
+5 个源"要防的事。这一列因此必须独立存在——`brief_claims` 上要多一列
+`merged_away_count`，§9 那张表相应补上——不能在算完 `independence` 之后顺手丢掉。
+
 由此定义 Claim 的 `confidence`：
 
 | confidence | 条件 | 处理 |
@@ -212,6 +226,27 @@ iOS 展示一页结论：查到了什么、为什么不够、冲突在哪。
 - `kind: fact` 而 `claim_ids` 为空 → **拒绝，重跑 ⑦**（这句是模型自己编的）
 - `claim_ids` 里出现未通过验证的 ID → 同上
 - `kind: opinion` 带 claim_ids → 剥离（观点不该伪装成有据可依）
+
+**⑧ 的产物不止句子级映射，还有句内字符区间。** 除了 `sentence_id → claim_ids`，
+每条挂接还要落一对位置：
+
+```
+{ "sentence_id": "...", "claim_id": "...", "start": 8, "length": 6 }
+```
+
+`start` / `length` **以 Character 计，不是 UTF-16 code unit**——中文一个字算一个。
+这不是洁癖：用 UTF-16 的话，一句话里只要有中文，后面每一条下划线都会整体错位，
+而且越往后错得越多。
+
+这条要求是从已定稿的 mock 反推出来的：审稿页里那些虚线下划线（`0.5 个百分点`、
+`3 月 15 日`）画在哪几个字底下，靠的就是这对数字。原先只写句子级映射，界面能画的
+就只有整句下划线——一句话里究竟哪几个字有据可依、哪几个字是模型自己的措辞，用户
+看不出来，而这正是"每句可溯源"里最有说服力的那一半。`script_evidence` 因此要多
+`start` / `length` 两列，§9 那张表相应补上。
+
+一个句子可以有多个锚点，指向同一条或不同的 Claim。区间越界或彼此重叠一律算 ⑧ 校验
+失败，该句退回无锚点的纯文本——**画错位置的下划线比不画更糟**，它会让用户点开一个
+数字，看到的却是另一件事的信源。
 
 **事实句与观点句的区分本身就是产品功能。** 审稿页里两者视觉不同：事实句可以
 展开看信源，观点句明确标为"你的判断"——让博主清楚知道哪几句是他要自己负责的。
@@ -395,14 +430,28 @@ func confirmBrief(id: UUID, edits: [SentenceEdit]) async throws -> Script
 2. **`RecordingView.script` 是 `let script: Script`**（`Features/Recording/RecordingView.swift:14`），
    不可选、构造时注入。相机作为根视图必须能在"没有稿"时运行，这个字段要变成
    `Script?`，提词块整块随之隐藏。
-3. **最麻烦的一处：`SessionManager` 在 `RecordingView.init` 里按 script 造出来**
-   （`RecordingView.swift:50`）。也就是说**相机会话的生命周期现在绑在某一篇稿上**——
-   换一篇稿等于重建整个 `SessionManager`，`CameraEngine` 跟着重建，用户会看到取景器
-   黑一下重启。
-   引擎层其实**已经支持**换稿（`SessionManager.prepare(script:)` 内部就是
-   `teleprompterEngine.load` + `alignmentEngine.reset`），**错的是构造时机，不是能力**。
-   要把 `SessionManager` 提到 `RecordingView` 之上（由 `AppEnvironment` 或一个相机场景
-   对象持有），`RecordingView` 只订阅它。
+3. **最麻烦的一处：`RecordingView.init` 每次构造都造一个新的 `SessionManager`**
+   （`RecordingView.swift:50`）。
+
+   这一条前一稿写的是"`SessionManager` 按 script 造出来"、"`scriptRevision` 要改成
+   可选"——**对着代码核过，两句都不对**：
+
+   - `SessionManager.init` 的签名是 `init(syncService:alignmentEngine:takeArchiver:)`，
+     **它根本不接受 script**。稿子是之后由 `prepare(script:)` 装进去的，而且那是个
+     **async** 方法。
+   - `scriptRevision` **本来就是** `private(set) var scriptRevision: ScriptRevision?`，
+     不存在"要改成可选"这回事。
+
+   真正的毛病在**谁持有它**：`SessionManager` 归 `RecordingView` 所有，`CameraEngine`
+   又在 `SessionManager` 的 init 里造一次。于是从列表进另一篇稿 = 新的 `RecordingView`
+   = 新的 `SessionManager` = 新的 `CameraEngine`，用户会看到取景器黑一下重启。
+   换句话说，**相机会话的生命周期被绑在某一篇稿上**，不是因为引擎不会换稿，而是因为
+   View 的构造顺手把它一起重建了。
+
+   引擎层其实**已经支持**换稿（`prepare(script:)` 内部就是 `teleprompterEngine.load` +
+   `alignmentEngine.reset`），**错的是持有者和构造时机，不是能力**。
+   结论不变：把 `SessionManager` 提到 `RecordingView` 之上（由 `AppEnvironment` 或一个
+   相机场景对象持有），`RecordingView` 只订阅它，换稿走一次 `await prepare(script:)`。
 
 顺带两条：
 
@@ -455,6 +504,22 @@ teleprompter spec 已写明"这次不改它"，并警告过**两边各拼一次�
 分环节的数字不只是好看，它把成本结构摊开了：抽取吃掉约 80% 的 token，成稿只占
 13%。将来要压成本，一眼知道该动哪里。
 
+**「本月余额」是账户级的数，不属于任何一篇 Brief。** 它由 §9.1 的 `accountBalance()`
+给出——本月额度减去本月已消耗——与单篇的 `tokens_budget` / `tokens_used` 是两套数，
+不能互相推算。等待页把两者并排摆着（`预算 120K · 已用 40%` 和 `本月余额 2.41M`），
+是因为用户在那一屏真正想知道的不是这一篇花了多少，而是"照这个烧法这个月还够不够"。
+
+**余额门禁放在 ④ 确认页**（上表"花钱之前"那一行，按旧编号写作「② 拨盘」，是同一屏）。
+判断只有一句：**预估 token 超过本月余额，就不许创建 Brief。** 不是创建完再提示，是
+在创建之前拒绝——按钮变成"余额不够，去充值"且不可点，并给出差额（"这一篇大约要
+120K，你只剩 80K"）。这也是 §2.2 拨盘上那块"买不起的区域"的判据，两者用同一个
+`estimateBrief` 结果。
+
+这一条与上面的**软预算**不冲突，两者管的是不同的事：软预算管**单篇跑超了自己的
+预估**——超了不停，如实结算；门禁管**账户根本付不起这一篇**——那就必须拦在花钱之前。
+九个阶段跑完才发现付不起，token 已经烧掉了，退不回来，而这一屏是烧钱之前的最后一屏
+（§8.2 说的那条不可逆边界就在它之后）。§11 的"余额门禁"那一行测的就是这件事。
+
 两个还没定的问题：
 
 - **超预算怎么办**——倾向**软预算**：超了不停，表上变色提示，结束后如实结算。
@@ -504,6 +569,25 @@ Claude 原生 `web_search` 时，只是把 ② 阶段整个换掉，③–⑨ �
 **管线最关键的逻辑全部可以离线测试。**
 
 ## 12 · 实现顺序
+
+⚠️ **本节的顺序在动手时被推翻了。** 下面写的是"先做后端管线、跑完质量关再投界面"，
+实际执行的是反过来：**先用 fixture 把七个界面立起来，全程零网络、一次模型调用都不发**，
+再去接真实管线。两份计划分别是：
+
+- 先做 `docs/superpowers/plans/2026-09-18-brief-ios-on-fixtures.md`（界面喂 fixture）
+- 后做 `docs/superpowers/plans/2026-09-18-brief-live-pipeline.md`（①–⑨ 真实管线）
+
+**质量关是推迟，不是取消。** 界面这一段做完，"稿子到底好不好、信源挂得准不准"仍然
+一个字都没回答；下面第二段那句"在 `1:00 通俗` 和 `3:00 偏专业` 两个锚点上各评一遍
+稿件质量"照样要过，只是挪到了界面之后。这个代价必须记在明面上，否则七个界面点起来
+很顺，容易让人以为产品已经成立了。
+
+换来的好处已经兑现：mock 反推出三样确定性内核目前产不出来的东西——§6.2 的句内字符
+区间、§5 的 `merged_away_count`、§10.1 的本月余额与余额门禁。这三样若等管线建完再
+发现，改动要横穿 schema、后端和界面，贵得多。界面先行的价值就在这里，不在"先看到
+东西"。
+
+以下是原定顺序，除被上面推翻的先后之外，内容仍然有效：
 
 这个 spec 的体量适合拆成两个实现计划，中间有一个天然的验证点：
 
