@@ -277,5 +277,43 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     handOff.text = "https://example.com/news"
     report.check(handOff.canProceed, "有内容才能走")
 
+    report.section("④ 拨盘")
+    var dial = DialState()
+    dial.setDuration(seconds: 9999)
+    report.check(dial.durationSec == 360, "时长封顶 6 分钟", detail: "\(dial.durationSec)")
+    dial.setDuration(seconds: 1)
+    report.check(dial.durationSec == 30, "下限 30 秒")
+
+    dial.setDuration(seconds: 71)
+    report.check(DialState.durationSteps.contains(dial.durationSec),
+                 "落在档位上——拨盘要有段落感", detail: "\(dial.durationSec)")
+    report.check(dial.durationSec == 60, "71 秒吸到最近的 60")
+
+    dial.setRegister(2.0)
+    report.check(dial.register == 1.0, "调性上界")
+    dial.setRegister(-1.0)
+    report.check(dial.register == 0.0, "调性下界")
+
+    dial.snap(to: .casualMinute)
+    report.check(dial.durationSec == 60 && dial.register == 0.0, "锚点一：60s 通俗")
+    let cheap = dial.estimate.tokens
+    dial.snap(to: .professionalThreeMinutes)
+    report.check(dial.durationSec == 180 && dial.register > 0.5, "锚点二：3min 偏专业")
+    report.check(dial.estimate.tokens > cheap, "3 分钟比 1 分钟贵",
+                 detail: "\(cheap) → \(dial.estimate.tokens)")
+
+    var plain = DialState(); plain.setDuration(seconds: 180); plain.setRegister(0.0)
+    var pro = DialState(); pro.setDuration(seconds: 180); pro.setRegister(1.0)
+    report.check(pro.estimate.tokens > plain.estimate.tokens, "同样时长，越专业越贵")
+
+    report.section("余额门禁")
+    var broke = DialState(remainingTokens: 1000)
+    broke.snap(to: .professionalThreeMinutes)
+    report.check(!broke.canAfford, "余额不足必须在花钱之前拦住")
+    report.check(broke.blockReason != nil, "要说清为什么")
+    var rich = DialState(remainingTokens: 10_000_000)
+    rich.snap(to: .professionalThreeMinutes)
+    report.check(rich.canAfford && rich.blockReason == nil, "余额够就放行")
+
     return (report.pass, report.fail)
 }
