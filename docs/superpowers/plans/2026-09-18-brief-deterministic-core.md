@@ -2030,6 +2030,7 @@ git commit -m "Bind sources to sentences by lookup, never by the model's word"
 import { expect, test } from "vitest";
 import { buildBrief } from "../src/core.js";
 import type { CoreInput } from "../src/core.js";
+import type { Fact, Source } from "../src/domain/types.js";
 
 const WIRE = "央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。";
 
@@ -2067,7 +2068,7 @@ test("the four sources collapse to three groups and the claim is strong", () => 
 
 test("one strong claim is not enough to produce a script", () => {
   const out = buildBrief(input());
-  expect(out.verdict).toBe("insufficient");
+  expect(out.selection.verdict).toBe("insufficient");
   expect(out.selection.reason).toBe("only 1 strong claims, need 3");
 });
 
@@ -2082,6 +2083,58 @@ test("binding and prosody still run so problems surface even when insufficient",
   expect(out.bind.ok).toBe(true);
   expect(out.seconds).toBeGreaterThan(0);
   expect(out.breaths.length).toBeGreaterThan(0);
+});
+
+/**
+ * 四条 strong + 一对互相冲突的 claim。上面那个 fixture 永远停在 insufficient，
+ * 于是「名额切片」和「排除 conflicted」这两段接缝一次都没被执行过——
+ * 把 estimate.factSlots 换成 estimate.sources、或者删掉 conflicted 过滤，
+ * 五个测试全绿。这个 fixture 专门用来走到 ok 分支。
+ */
+function sufficient(): CoreInput {
+  const bodies = [
+    "中国人民银行决定于三月十五日下调金融机构存款准备金率零点五个百分点。",
+    "Reuters 独立测算显示，此次操作对应释放的长期资金规模在一万亿元左右。",
+    "财新记者从多家银行了解到，降准落地后信贷投放节奏将有所前移。",
+    "彭博社获得的数据显示，本轮操作对应的资金规模约 31 亿美元等值。",
+  ];
+  const sources: Source[] = bodies.map((body, i) => ({
+    id: `s${i}`, url: `https://x${i}.example/a`, publisher: `p${i}`,
+    publishedAt: "2026-03-01T07:00:00Z", body, creditedTo: null,
+  }));
+  const texts = [
+    "此次降准释放长期资金约 1 万亿元",
+    "存款准备金率下调 0.5 个百分点",
+    "新政自 3 月 15 日起生效",
+    "信贷投放节奏将有所前移",
+  ];
+  const facts: Fact[] = texts.flatMap((text, t) =>
+    [0, 1, 2].map((s) => ({ id: `f${t}${s}`, sourceId: `s${s}`, text, quote: text })));
+  facts.push({ id: "fx", sourceId: "s2", text: "涉及资金规模约 23 亿美元", quote: "x" });
+  facts.push({ id: "fy", sourceId: "s3", text: "涉及资金规模约 31 亿美元", quote: "y" });
+  return { durationSec: 60, register: 0.25, charsPerSecond: 5.5, sources, facts, draft: [] };
+}
+
+test("the slot budget actually limits what gets picked", () => {
+  const out = buildBrief(sufficient());
+  expect(out.selection.verdict).toBe("ok");
+  // 四条 strong，名额只有三个。传成 estimate.sources（11）的话这里会是 4。
+  expect(out.estimate.factSlots).toBe(3);
+  expect(out.selection.picked).toHaveLength(3);
+});
+
+test("a sentence citing a conflicted claim does not bind", () => {
+  // 删掉 `confidence !== "conflicted"` 那个过滤，这一条会变绿——上面的 fixture
+  // 一条冲突 claim 都没有，所以那个过滤在别处全是空转。
+  const conflicted = buildBrief(sufficient()).claims.find((c) => c.confidence === "conflicted");
+  expect(conflicted).toBeDefined();
+
+  const brief = sufficient();
+  brief.draft = [{ text: "涉及资金规模约 23 亿美元。", kind: "fact", claimIds: [conflicted!.id] }];
+  expect(buildBrief(brief).bind).toEqual({
+    ok: false,
+    problems: [{ kind: "unknown-claim", sentenceIndex: 0, claimId: conflicted!.id }],
+  });
 });
 
 test("a fabricated fact sentence is caught", () => {
@@ -2131,7 +2184,6 @@ export interface CoreResult {
   estimate: BriefEstimate;
   claims: VerifiedClaim[];
   selection: Selection;
-  verdict: Selection["verdict"];
   bind: BindResult;
   seconds: number;
   breaths: BreathMark[];
@@ -2145,10 +2197,15 @@ export function buildBrief(input: CoreInput): CoreResult {
   const estimate = estimateBrief(input.durationSec, input.register);
 
   const merged = mergeFacts(input.facts);
-  const claims = classifyClaims(merged, input.facts, input.sources, input.mediaGroups ?? {});
+  const claims = classifyClaims(merged, input.facts, input.sources, input.mediaGroups);
   const selection = selectClaims(claims, estimate.factSlots);
 
-  // 即便 insufficient 也照样跑绑定与时长：问题要浮出来，不能被一个 verdict 盖掉
+  // 即便 insufficient 也照样跑绑定与时长：问题要浮出来，不能被一个 verdict 盖掉。
+  //
+  // 这里喂给 bind 的是**全部通过验证的** claim，不是 selection.picked——两个阶段
+  // 管的事不同：selection 决定「在这个长度里谁配进稿」，bind 决定「这条引用是不是
+  // 真的」。若改用 picked，insufficient 时 picked 是空的，于是每一句事实句都会报
+  // unknown-claim，把「模型编了一句」这个唯一该浮出来的信号淹掉。
   const verifiedIds = claims.filter((c) => c.confidence !== "conflicted").map((c) => c.id);
   const bind = bindEvidence(input.draft, verifiedIds);
 
@@ -2157,7 +2214,6 @@ export function buildBrief(input: CoreInput): CoreResult {
     estimate,
     claims,
     selection,
-    verdict: selection.verdict,
     bind,
     seconds: texts.reduce((total, t) => total + estimateSeconds(t, input.charsPerSecond), 0),
     breaths: breathMarks(texts),
@@ -2171,7 +2227,7 @@ export function buildBrief(input: CoreInput): CoreResult {
 cd pipeline && npx vitest run test/core.test.ts
 ```
 
-Expected: `5 passed`
+Expected: `7 passed`
 
 - [ ] **Step 5: 提交**
 
@@ -2250,7 +2306,7 @@ test("the reserve-cut fixture produces a script and exits zero", () => {
   expect(code).toBe(0);
 
   const result = JSON.parse(out);
-  expect(result.verdict).toBe("ok");
+  expect(result.selection.verdict).toBe("ok");
   expect(result.bind.ok).toBe(true);
 });
 
@@ -2320,7 +2376,7 @@ function main(argv: string[]): number {
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 
   // 出稿了但绑定有问题，是最该被 CI 拦住的情况
-  if (result.verdict === "ok" && !result.bind.ok) return 1;
+  if (result.selection.verdict === "ok" && !result.bind.ok) return 1;
   return 0;
 }
 
@@ -2565,15 +2621,36 @@ create index briefs_user_status_idx on briefs (user_id, status);
 
 - [ ] **Step 2: 本地建库验证**
 
-按 `backend/README.md` 的既有做法，在临时 Postgres 上跑 `0001` 再跑 `0002`：
+机器上有 Homebrew 的 Postgres 17，但**不在 PATH 里，而且默认 locale 会让 `initdb` 直接报错**。
+下面这套是实际跑通过的，照抄即可（端口 55432，走 Unix socket，不监听网络）：
 
 ```bash
-cd /Users/fengzhou/Code/PolluxOne/backend
-psql "$DATABASE_URL" -f supabase/migrations/0001_init.sql
-psql "$DATABASE_URL" -f supabase/migrations/0002_briefs.sql
+export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"
+D=/tmp/pollux-pgdata
+LC_ALL=C initdb -D "$D" -U postgres --auth=trust --locale=C --encoding=UTF8
+LC_ALL=C pg_ctl -D "$D" -o "-p 55432 -k /tmp -c listen_addresses=" -l "$D/server.log" start
+LC_ALL=C psql -h /tmp -p 55432 -U postgres -c "create database t;"
 ```
 
-Expected: 两个文件都无错误退出（`CREATE TABLE` / `CREATE POLICY` 回显，无 `ERROR:`）
+`0001` 引用 `auth.users` 和 `auth.uid()`，本地没有 Supabase 的 auth schema，先打个桩：
+
+```bash
+LC_ALL=C psql -h /tmp -p 55432 -U postgres -d t -v ON_ERROR_STOP=1 <<'SQL'
+create schema auth;
+create table auth.users (id uuid primary key default gen_random_uuid(), email text);
+create function auth.uid() returns uuid language sql stable as $$ select '00000000-0000-0000-0000-000000000000'::uuid $$;
+SQL
+```
+
+然后依次跑两个迁移：
+
+```bash
+cd /Users/fengzhou/Code/PolluxOne
+LC_ALL=C psql -h /tmp -p 55432 -U postgres -d t -q -v ON_ERROR_STOP=1 -f backend/supabase/migrations/0001_init.sql
+LC_ALL=C psql -h /tmp -p 55432 -U postgres -d t -q -v ON_ERROR_STOP=1 -f backend/supabase/migrations/0002_briefs.sql
+```
+
+Expected: 两条都静默成功（`-q` 下无输出即为通过；有 `ERROR:` 就是失败）
 
 - [ ] **Step 3: 确认外键指向真的存在**
 
@@ -2878,7 +2955,7 @@ git commit -m "Say what the pipeline does and does not do yet"
 ## 完成标准
 
 - `cd pipeline && npm test` 全绿，**零 API key、零网络**
-- `npm run brief -- test/fixtures/reserve-cut.json`：「1 万亿」那条 `independence: 3`（不是 4，因为一篇是转载）、路透/彭博两条 `conflicted` 且不进稿
+- `npm run brief -- test/fixtures/reserve-cut.json`：`selection.verdict` 为 `ok`、「1 万亿」那条 `independence: 3`（不是 4，因为一篇是转载）、路透/彭博两条 `conflicted` 且不进稿
 - spec §11 的前四行测试全部有对应的断言
 - `0002_briefs.sql` 在本地 Postgres 上跑得过
 
