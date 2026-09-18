@@ -302,8 +302,10 @@ brief_stages     id · brief_id · stage · status · started_at · ended_at · 
 brief_sources    id · brief_id · url · publisher · published_at · body · fingerprint
 brief_facts      id · brief_id · source_id · text · quote · extracted_at
 brief_claims     id · brief_id · text · independence · confidence
-claim_sources    claim_id · source_id                      （多对多）
-script_evidence  script_id · sentence_id · claim_id         （⑧ 的产物）
+claim_facts      claim_id · fact_id                         （多对多）
+claim_conflicts  claim_id · conflicts_with                  （谁和谁冲突）
+script_evidence  sentence_id · claim_id · sentence_fingerprint （⑧ 的产物）
+sentence_breaths sentence_id · kind · char_offset           （⑨ 的产物，一句多行）
 ```
 
 `briefs.input_kind`：`text` ｜ `image`（**只有两类**——链接由 ① 抓原文自己判断
@@ -312,6 +314,19 @@ script_evidence  script_id · sentence_id · claim_id         （⑧ 的产物�
 `briefs.status`：`queued` → `running` → `drafted` → `confirmed` ｜ `insufficient` ｜ `failed` ｜ `canceled`
 
 `brief_stages.result` 里各阶段分别记自己的 token 消耗，③ 等待页的分色堆叠条直接读它。
+
+三处和本节初稿的出入，都是实现时想清楚后有意改的：
+
+- **`claim_facts` 而不是 `claim_sources`**。Claim 是由 Fact 归并出来的，独立源要
+  顺着 fact → source 走一遍才算得出。直接存一份 source 列表就多了一个会和事实
+  对不上的副本。
+- **`claim_conflicts` 是新加的**。只在 claim 上记一个 `confidence = 'conflicted'`
+  不够用：⑥「不建议播」那屏要把冲突双方并排摆出来（路透 23 亿 vs 彭博 31 亿），
+  光知道「这条有冲突」渲染不出来。
+- **`sentence_breaths` 一句多行**，不是 `sentence_prosody` 一句一行。⑨ 对每个句内
+  逗号都产出一个带位置的短气口、句末再产出一个长气口；做成每句单个枚举的话那一列
+  永远只会是 `long`，而提词器真正用来配速的句内短气口全部无处可去。重读
+  （emphasis）目前没有任何代码产出，等有了再单独建表。
 
 Brief 产出的 Script 走现有表，不加字段。`script_evidence` 挂在旁边，
 提词器和录制侧完全不需要知道它存在。
@@ -419,8 +434,11 @@ teleprompter spec 已写明"这次不改它"，并警告过**两边各拼一次�
 `Sentence` 是 `id/order/text/tokens`，`sentences` 表是 `id/paragraph_id/sort_order/text`。
 "Script 不加字段"和 §7 的"气口落在 Sentence 的元数据上"**不能同时成立**。
 
-决定：另建 `sentence_prosody`（`sentence_id · breath_after · emphasis_spans`），
-和 `script_evidence` 一样挂在旁边。提词器要用时才读，不用时 Script 仍然是干净的。
+决定：另建 `sentence_breaths`（`sentence_id · kind · char_offset`），和
+`script_evidence` 一样挂在旁边。提词器要用时才读，不用时 Script 仍然是干净的。
+
+**一句多行**：⑨ 对每个句内逗号都产出一个带位置的短气口，句末再产出一个长气口。
+表上用一条 check 约束把这个判别联合固化下来——short 必须带位置，long 必须不带。
 
 ## 10 · 成本与计费
 

@@ -521,6 +521,9 @@ export interface SourceGroup {
  *    或滑窗级相似度。
  * 2. 两家门户都写「据新华社报道」、而新华社原稿不在本次信源集合里时，rule 2 不匹配
  *    ——它比的是 `a.creditedTo === b.publisher`，不是两边 `creditedTo` 相等。
+ * 3. rule 3 和 mediaGroups 查表都是 publisher 字符串的**精确相等**。抓取时把同一家
+ *    记成「新华社」和「新华网」、或者多带一个空格、或者全角半角不一致，这一家就被
+ *    劈成两个独立源。前两条难在语义，这一条只是字符串没有归一化——反而更容易发生。
  *
  * @param mediaGroups publisher → 媒体集团 key 的映射。同集团视为同一主体。
  */
@@ -1668,6 +1671,7 @@ test("a nonsensical slot count is a caller error, not an empty script", () => {
   const claims = [claim("c0", "strong", 3), claim("c1", "strong", 3), claim("c2", "strong", 3)];
   expect(() => selectClaims(claims, -1)).toThrow(/factSlots/);
   expect(() => selectClaims(claims, 2.5)).toThrow(/factSlots/);
+  expect(() => selectClaims(claims, 2)).toThrow(/at least 3/);
 });
 
 test("a long duration does not lower the bar", () => {
@@ -1740,11 +1744,15 @@ export interface Selection {
  * 至于进稿的这几条怎么排、钩子怎么下，那是编辑判断，交给模型（下一个计划）。
  */
 export function selectClaims(claims: VerifiedClaim[], factSlots: number): Selection {
-  // `slice(0, -1)` 返回的是「除最后一个之外的全部」，不是空数组——名额传成负数
-  // 会产出一篇**比该有的更满**的稿子，正是这一阶段要防的方向。
-  // 名额来自 estimateBrief，那边保证 ≥ 3；走到这里说明调用方传错了。
-  if (!Number.isInteger(factSlots) || factSlots < 0) {
-    throw new Error(`factSlots must be a non-negative integer, got ${factSlots}`);
+  // 两件事：`slice(0, -1)` 返回的是「除最后一个之外的全部」而不是空数组，所以
+  // 名额传成负数会产出一篇**比该有的更满**的稿子；而名额小于三，则装不下
+  // §5.1 要求的三条 strong 打底，于是会得到一篇 verdict 为 ok、却只有两条
+  // 事实的稿子。后者原本只是因为 estimateBrief 的 minimumFactSlots 恰好是 3
+  // 才没发生——那个底线不该寄存在另一个模块的系数里。
+  if (!Number.isInteger(factSlots) || factSlots < MINIMUM_STRONG_CLAIMS) {
+    throw new Error(
+      `factSlots must be an integer of at least ${MINIMUM_STRONG_CLAIMS}, got ${factSlots}`,
+    );
   }
 
   const conflicted = claims.filter((c) => c.confidence === "conflicted").map((c) => c.id);
@@ -3080,13 +3088,16 @@ git commit -m "Say what the pipeline does and does not do yet"
 3. **`ESTIMATE_COEFFICIENTS` 回归校准**：用真实样本的实际消耗，把 Task 8 里钉住的系数换成量出来的
 4. **两个锚点的稿件质量评估**：`1:00 通俗` 与 `3:00 偏专业`，spec §11 最后一行——这才是第一段真正要回答的问题
 5. **`user_reading_rates` 的 iOS 采集**：导出 `ReadingPacer.rate`，独立计划
-6. **`angle` 的消费**：迁移已经建了列（§2.3），但把它当 ⑥ 选点的软约束是模型侧的事
-7. **独立源规则集的两个盲区**（§5 的规则现在漏这两类，都朝算多的方向）：
+6. **绑定用的是「全部通过验证的」claim，不是 selection.picked**（`core.ts` 里有注释
+   说明为什么）。副作用：一句引用了「验证通过但没进名额」的 claim 也能绑成。
+   写稿那一步必须只从 `picked` 里取素材，这个约束在模型侧，不在这里
+7. **`angle` 的消费**：迁移已经建了列（§2.3），但把它当 ⑥ 选点的软约束是模型侧的事
+8. **独立源规则集的两个盲区**（§5 的规则现在漏这两类，都朝算多的方向）：
    轻改+只摘引一段的转载逃过整篇 Jaccard；两家都引一个不在信源集合里的通讯社时
    `creditedTo` 不相等匹配。前者要段落级相似度，后者要决定「同 creditedTo 是否即归并」
-8. **claim id 是位置函数**：`c${n}` 由 fact 到达顺序决定。当前是「一次跑到底」，
+9. **claim id 是位置函数**：`c${n}` 由 fact 到达顺序决定。当前是「一次跑到底」，
    同一次运行内稳定就够用。真要支持「人工改完事实列表再从 ④ 增量重跑」，
    得换成内容 hash 或最小 factId
-9. **落库时的文本口径**：本包只产出**句子文本**，从不拼接整篇——spec §9.2 ④ 警告过
+10. **落库时的文本口径**：本包只产出**句子文本**，从不拼接整篇——spec §9.2 ④ 警告过
    两边各拼一次会让提词器的字偏移永久性偏移且随脚本长度累积。排版口径由
    `PromptScriptText` 唯一持有。下一个计划写库时必须守住这条
