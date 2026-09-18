@@ -40,6 +40,12 @@ final class AppEnvironment {
     }
 
     func signOut() async {
+        // The session outlives every screen now, so nothing else will stop the
+        // camera on the way out — RecordingView used to do it in onDisappear,
+        // which is exactly the coupling that had to go. Without this the
+        // capture session keeps running behind the login screen, indicator
+        // light and all.
+        sessionManager.teardown()
         await backend.signOut()
         currentUser = nil
     }
