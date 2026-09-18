@@ -2968,3 +2968,103 @@ npx tsx src/cli.ts https://<一条真实新闻> --duration 180 --register 0.7   
 - 七个 iOS 界面、Share Extension、`SessionManager` 上提（§9.2 ②）
 - Safe Word 指纹降级（§9.2 ③）、`PromptScriptText` 拼接纪律（§9.2 ④）
 - 截图输入（① 的视觉分支）
+
+---
+
+## Task 17: 补上 schema 里缺的两列（界面那一段逼出来的）
+
+**Files:**
+- Create: `backend/supabase/migrations/0003_evidence_anchors.sql`
+
+`0002_briefs.sql` 建表时，spec 还没有「句内证据锚点」和「被归并的转载篇数」这两个概念——
+它们是先做界面那一段从 mock 里反推出来的（见 `2026-09-18-brief-ios-on-fixtures.md` §0.4）。
+spec §5 / §6.2 现在已经写明要产出它们，但表里没有地方放。
+
+**为什么另建表而不是给 `script_evidence` 加列**：它的主键是
+`(sentence_id, claim_id)`，一句话对同一条 claim 只能有一行。而锚点是 0..n 个——
+一句话可能在两处提到同一个数字。加列会把这个上限固化成 1，而且锚点本来就是
+可缺省的（越界或重叠时整句降级为纯文本），塞进主表会多出一对可空列。
+这与 §9.2 ⑤ 给气口另建 `sentence_breaths` 是同一个判断。
+
+- [ ] **Step 1: 写迁移**
+
+```sql
+-- 句内证据锚点：审稿页那条虚线下划线的位置。
+-- start/length 以 **Character** 计，不是 UTF-16 code unit —— 句中一有中文，
+-- 用 UTF-16 会让后面每条下划线整体错位，且越往后偏得越多。
+create table evidence_anchors (
+  id uuid primary key default gen_random_uuid(),
+  sentence_id uuid not null,
+  claim_id uuid not null,
+  char_start integer not null check (char_start >= 0),
+  char_length integer not null check (char_length > 0),
+  -- 锚点依附于一条 evidence；evidence 没了，锚点没有意义
+  foreign key (sentence_id, claim_id)
+    references script_evidence (sentence_id, claim_id) on delete cascade,
+  -- 同一条 evidence 的多个锚点不许起点相同
+  unique (sentence_id, claim_id, char_start)
+);
+
+alter table evidence_anchors enable row level security;
+
+create policy "evidence_anchors follow their evidence" on evidence_anchors
+  for all using (
+    exists (
+      select 1 from script_evidence e
+      join sentences s on s.id = e.sentence_id
+      join paragraphs p on p.id = s.paragraph_id
+      join script_sections sec on sec.id = p.section_id
+      join scripts sc on sc.id = sec.script_id
+      where e.sentence_id = evidence_anchors.sentence_id
+        and e.claim_id = evidence_anchors.claim_id
+        and sc.user_id = auth.uid()
+    )
+  );
+
+create index evidence_anchors_by_sentence on evidence_anchors (sentence_id);
+
+-- 被判为转载、已归并掉的篇数。与 independence 分开存：
+-- 两者相加（3 + 6 = 9）正是 §5 开头「5 家门户转载不是 5 个源」要防的误读，
+-- 合并成一个数就只剩「3 个独立信源」，没法显示「另有 6 篇未计入」。
+alter table brief_claims
+  add column merged_away_count integer not null default 0
+  check (merged_away_count >= 0);
+```
+
+- [ ] **Step 2: 在真 Postgres 上验一遍**
+
+照 `0002` 当初的做法起一个临时实例（`initdb` 需要 `LC_ALL=C … --locale=C --encoding=UTF8`，
+并先建 `auth` schema stub：`auth.users` 表和 `auth.uid()` 函数，因为 `0001_init.sql`
+引用了 Supabase Auth）。依次跑 `0001` → `0002` → `0003`，必须全部无错。
+
+- [ ] **Step 3: 补 §9 的数据模型表**
+
+`docs/superpowers/specs/2026-09-17-news-brief-pipeline-design.md` 的 §9 表里加上
+`evidence_anchors` 这张表和 `brief_claims.merged_away_count` 这一列。
+照 §9 建表的人现在会漏掉它们。
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add backend/supabase/migrations/0003_evidence_anchors.sql docs/superpowers/specs/2026-09-17-news-brief-pipeline-design.md
+git commit -m "$(cat <<'EOF'
+Give the underlines and the excluded reposts a column to live in
+
+Both fields came out of building the screens first: the mock needed
+character ranges for the in-sentence underlines and a count of the reposts
+that were merged away, and 0002 was written before either existed.
+
+Anchors get their own table rather than columns on script_evidence, whose
+primary key allows one row per sentence-claim pair. A sentence can anchor
+the same claim in two places, and an anchor is optional anyway — it
+degrades to plain text when the range is wrong — so folding it into the
+main table would cap it at one and add a pair of nullable columns. Breaths
+were given a sibling table for the same reason.
+
+merged_away_count stays separate from independence because adding them is
+the misreading the whole independence count exists to prevent.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+EOF
+)"
+```
