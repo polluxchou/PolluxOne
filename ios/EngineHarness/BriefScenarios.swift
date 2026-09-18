@@ -133,5 +133,25 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     report.check(ScriptSlot(brief: short).destination == .insufficient,
                  "信源不足时去「不建议播」")
 
+    report.section("删句与孤儿证据")
+    // s4 是唯一引用 c3 的句子。
+    let afterS4 = brief.deletingSentence("s4")
+    report.check(afterS4.sentences.count == brief.sentences.count - 1, "少一句")
+    report.check(!afterS4.sentences.contains { $0.id == "s4" }, "那句没了")
+    report.check(afterS4.claims["c3"] == nil, "没人用的 claim 被清掉")
+
+    // s2 和 s3 共用 c1。
+    let afterS3 = brief.deletingSentence("s3")
+    report.check(afterS3.claims["c1"] != nil, "还有别的句子在用，不能清")
+
+    var emptied = brief
+    for sentence in brief.sentences { emptied = emptied.deletingSentence(sentence.id) }
+    report.check(emptied.sentences.isEmpty, "删光了")
+    report.check(emptied.status == .insufficient,
+                 "空稿降级为不建议播，而不是留一个看起来还能播的空壳")
+
+    report.check(brief.deletingSentence("no-such-id").sentences.count == brief.sentences.count,
+                 "删一个不存在的 id 不改变任何东西")
+
     return (report.pass, report.fail)
 }
