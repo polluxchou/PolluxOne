@@ -23,7 +23,7 @@ enum AudioSessionController {
         try session.setCategory(
             .playAndRecord,
             mode: .videoRecording,
-            options: [.allowBluetooth, .defaultToSpeaker]
+            options: [.allowBluetoothHFP, .defaultToSpeaker]
         )
         try session.setActive(true, options: [])
     }
