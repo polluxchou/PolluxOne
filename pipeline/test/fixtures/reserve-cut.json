@@ -1,0 +1,32 @@
+{
+  "durationSec": 60,
+  "register": 0.25,
+  "charsPerSecond": 5.5,
+  "sources": [
+    { "id": "s0", "url": "https://pbc.example/a", "publisher": "pbc", "publishedAt": "2026-03-01T07:00:00Z", "body": "央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。", "creditedTo": null },
+    { "id": "s1", "url": "https://portal.example/a", "publisher": "portal", "publishedAt": "2026-03-01T07:20:00Z", "body": "【转载】央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。", "creditedTo": null },
+    { "id": "s2", "url": "https://reuters.example/a", "publisher": "reuters", "publishedAt": "2026-03-01T08:00:00Z", "body": "Reuters 独立测算显示，此次操作对应释放的长期资金规模在一万亿元左右，生效日期为三月十五日，涉及资金规模约 23 亿美元等值。", "creditedTo": null },
+    { "id": "s3", "url": "https://caixin.example/a", "publisher": "caixin", "publishedAt": "2026-03-01T09:00:00Z", "body": "财新记者从多家银行了解到，此次降准释放长期资金约 1 万亿元，三月十五日起生效，信贷投放节奏将前移。", "creditedTo": null },
+    { "id": "s4", "url": "https://bbg.example/a", "publisher": "bloomberg", "publishedAt": "2026-03-01T09:30:00Z", "body": "彭博社获得的数据显示，本轮操作对应的资金规模约 31 亿美元等值，与其他机构测算存在差异。", "creditedTo": null }
+  ],
+  "facts": [
+    { "id": "f0", "sourceId": "s0", "text": "此次降准释放长期资金约 1 万亿元", "quote": "此次降准将释放长期资金约一万亿元" },
+    { "id": "f1", "sourceId": "s1", "text": "此次降准将释放长期资金约 1 万亿元", "quote": "此次降准将释放长期资金约一万亿元" },
+    { "id": "f2", "sourceId": "s2", "text": "此次降准释放长期资金约 1 万亿元", "quote": "长期资金规模在一万亿元左右" },
+    { "id": "f3", "sourceId": "s3", "text": "此次降准释放长期资金约 1 万亿元", "quote": "释放长期资金约 1 万亿元" },
+    { "id": "f4", "sourceId": "s0", "text": "存款准备金率下调 0.5 个百分点", "quote": "下调金融机构存款准备金率零点五个百分点" },
+    { "id": "f5", "sourceId": "s2", "text": "存款准备金率下调 0.5 个百分点", "quote": "下调零点五个百分点" },
+    { "id": "f6", "sourceId": "s3", "text": "存款准备金率下调 0.5 个百分点", "quote": "降准零点五个百分点" },
+    { "id": "f7", "sourceId": "s0", "text": "新政自 3 月 15 日起生效", "quote": "自三月十五日起生效" },
+    { "id": "f8", "sourceId": "s2", "text": "新政自 3 月 15 日起生效", "quote": "生效日期为三月十五日" },
+    { "id": "f9", "sourceId": "s3", "text": "新政自 3 月 15 日起生效", "quote": "三月十五日起生效" },
+    { "id": "f10", "sourceId": "s2", "text": "涉及资金规模约 23 亿美元", "quote": "涉及资金规模约 23 亿美元等值" },
+    { "id": "f11", "sourceId": "s4", "text": "涉及资金规模约 31 亿美元", "quote": "资金规模约 31 亿美元等值" }
+  ],
+  "draft": [
+    { "text": "央行今天突然出手了。", "kind": "transition", "claimIds": [] },
+    { "text": "存款准备金率下调 0.5 个百分点，3 月 15 日正式生效。", "kind": "fact", "claimIds": ["c1", "c2"] },
+    { "text": "这次将释放长期资金约 1 万亿元。", "kind": "fact", "claimIds": ["c0"] },
+    { "text": "我的判断是，这一轮宽松还没到头。", "kind": "opinion", "claimIds": [] }
+  ]
+}
