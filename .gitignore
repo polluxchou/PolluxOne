@@ -17,6 +17,8 @@ web/*.tsbuildinfo
 # Pipeline
 pipeline/node_modules/
 pipeline/*.tsbuildinfo
+pipeline/.env*
+!pipeline/.env.example
 
 # Backend / Supabase
 backend/supabase/.branches/
