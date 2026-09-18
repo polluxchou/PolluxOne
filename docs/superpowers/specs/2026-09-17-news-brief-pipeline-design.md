@@ -261,6 +261,15 @@ iOS 展示一页结论：查到了什么、为什么不够、冲突在哪。
 - 有历史数据：取该用户**近 10 次**录制的中位 charsPerSecond（中位而非均值——一次结巴的 take 不该拖慢全局）
 - 新用户：按语种默认值（`ScriptLanguage` 已有中英分流）
 
+样本存在 **`reading_rate_samples`**（`0004_reading_rate_samples.sql`），**一次 take 一行**：
+「近 10 次的中位」要真的有 10 个样本可取，而 `user_reading_rates` 主键是
+`(user_id, language)`，一个语种只有一行，存不下 10 个值。`user_reading_rates`
+保留，角色改成**由样本算出来的缓存**——读取路径先看它，缺了再从样本现算。
+
+一次 take 一行也让窗口大小留在 query 里：今天是 10，改成 20 或者「最近 30 天」
+都只是换一句 `order by recorded_at desc limit N`，而不是改表。这就是不把 10 个值
+塞进一个数组列的理由。
+
 气口按标点和句法切：句末标点 = 长气口，句中逗号/顿号 = 短气口。
 这些落在 Sentence 的元数据上，提词器的固定行窗配速可以直接消费。
 
@@ -343,6 +352,9 @@ script_evidence  sentence_id · claim_id · sentence_fingerprint （⑧ 的产�
 evidence_anchors id · sentence_id · claim_id · char_start · char_length
                                                             （⑧ 的产物，一条 evidence 0..n 行）
 sentence_breaths sentence_id · kind · char_offset           （⑨ 的产物，一句多行）
+reading_rate_samples
+                 id · user_id · language · chars_per_second · recorded_at
+                                                            （§7 的语速样本，一次 take 一行）
 ```
 
 `briefs.input_kind`：`text` ｜ `image`（**只有两类**——链接由 ① 抓原文自己判断
@@ -377,6 +389,16 @@ sentence_breaths sentence_id · kind · char_offset           （⑨ 的产物�
 - **`brief_claims.merged_away_count` 与 `independence` 分开存**。两者相加
   （3 + 6 = 9）正是 §5 开头「5 家门户转载不是 5 个源」要防的误读；合并成一个数
   就只剩「3 个独立信源」，没法显示「另有 6 篇未计入」。
+
+再后补一处（`0004_reading_rate_samples.sql`）：
+
+- **`reading_rate_samples` 另建表，`user_reading_rates` 保留为缓存**。后者主键是
+  `(user_id, language)`，一个语种只有一行——§7 的「近 10 次中位」在它上面**没有
+  数据来源**，一行取不出 10 个样本。退回成跑动平均能塞进这一行，但中位数存在的
+  唯一理由就是抗住「一次读错稿、中途停顿」产生的极端值，均值会被那一次拖走。
+  一次 take 一行，窗口大小就留在 query 里（10 → 20 → 「最近 30 天」都不用改表），
+  这也是不把 10 个值塞进数组列的理由。`(user_id, language, recorded_at desc)`
+  上有索引，取最近 N 条走它。旧表不删——它的角色变成由样本算出来的缓存值。
 
 Brief 产出的 Script 走现有表，不加字段。`script_evidence` 挂在旁边，
 提词器和录制侧完全不需要知道它存在。
@@ -413,8 +435,10 @@ func confirmBrief(id: UUID, edits: [SentenceEdit]) async throws -> Script
 
 - take 结束时导出 `ReadingPacer.rate`，带语种和置信度（`minimumRateConfidence = 0.5`，
   低于门槛的 take 不计入）
-- 新建 `user_reading_rates`（`user_id · language · chars_per_second · sample_count · updated_at`），
-  §7 说的"近 10 次中位"从这里取
+- 新建 `user_reading_rates`（`user_id · language · chars_per_second · sample_count · updated_at`）
+  —— **更正**：这张表一个语种只有一行，§7 说的"近 10 次中位"取不出来。样本改存
+  `reading_rate_samples`（一次 take 一行，见 §7 与本节末），`user_reading_rates`
+  留作缓存
 
 这也意味着**新用户的第一篇稿必然用语种默认值**——差异化要等几次录制之后才生效。
 产品文案不能上来就说"按你的语速"。
