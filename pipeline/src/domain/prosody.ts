@@ -16,7 +16,10 @@ export const DEFAULT_CHARS_PER_SECOND: Record<ScriptLanguage, number> = {
   latin: 16,
 };
 
-const CJK = /[㐀-䶿一-鿿぀-ヿ가-힯]/u;
+// 范围端点写成转义不是洁癖：\u3400 是 CJK 扩展 A 的起点、\u4e00 是基本区、
+// \u3040 是平假名、\uac00 是谚文。写成字面量的话那几个生僻字没人认得出，
+// 「这个区间到底圈了什么」这个意图就丢了。
+const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/u;
 
 /**
  * CJK 占字母总数的两成就算中文。iOS 侧 `ScriptLanguage.detect` 独立地也用了

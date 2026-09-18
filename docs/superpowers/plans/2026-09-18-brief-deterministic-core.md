@@ -1273,6 +1273,34 @@ test("both axes only ever push cost up", () => {
   }
 });
 
+test("a value exactly between two steps rounds down", () => {
+  // 拨盘被拖拽时中点天天经过。`<` 加上从左往右 reduce，等距时保留更小的档——
+  // 改成 `<=` 会把所有中点静默翻向上，而 Swift 端若实现方式不同就会和这里分歧。
+  expect(estimateBrief(37.5, 0.5).durationSec).toBe(30);
+  expect(estimateBrief(105, 0.5).durationSec).toBe(90);
+  expect(estimateBrief(270, 0.5).durationSec).toBe(240);
+});
+
+test("the register axis pushes cost up too", () => {
+  // 上一条只扫了 duration 轴，名字却说「两轴」。这一条把 register 轴补上。
+  let previous = -1;
+  for (const register of [0, 0.2, 0.4, 0.6, 0.8, 1]) {
+    const tokens = estimateBrief(120, register).tokens;
+    expect(tokens).toBeGreaterThan(previous);
+    previous = tokens;
+  }
+});
+
+test("the source count rounds rather than truncates", () => {
+  // 两个锚点取整前恰好都是整数（11.0 和 21.0），所以 round→floor 这个改动
+  // 在它们身上完全隐身。(90, 0.5) 取整前是 14.5，能区分。
+  const e = estimateBrief(90, 0.5);
+  expect(e.sources).toBe(15);
+  expect(e.tokens).toBe(104000);
+  expect(e.factSlots).toBe(4);
+  expect(e.researchMinutes).toBe(5);
+});
+
 test("the coefficients are pinned so a change has to be deliberate", () => {
   expect(ESTIMATE_COEFFICIENTS).toEqual({
     tokensBase: 15000,
@@ -1291,6 +1319,8 @@ test("the coefficients are pinned so a change has to be deliberate", () => {
 ```
 
 最后一条不是在测逻辑，是在**钉住系数**。这些数字现在是从 mock 里定的，下一个计划要用真实样本回归校准；钉住之后任何调整都会亮一条失败的测试，逼人当面记下"为什么改"。
+
+**做回归标定的人注意**：这条测试会在你第一次改系数时失败，那是设计如此，不是你引入的 bug。把期望值和新系数一起更新即可。
 
 - [ ] **Step 2: 跑测试确认它失败**
 
@@ -1337,6 +1367,13 @@ export interface BriefEstimate {
   researchMinutes: number;
 }
 
+/**
+ * 落到最近的一档。**等距时保留更小的那一档**（`<` 加上从左往右扫描）——
+ * 拨盘拖拽时中点天天经过，这个方向必须是写明的决定，不能是实现的副产品。
+ *
+ * iOS 侧的拨盘本来只会产出这十个值，所以这里的 snap 是**防御性**的；
+ * 档位的权威定义始终是 `DURATION_STEPS` 本身。
+ */
 function snapDuration(durationSec: number): number {
   return DURATION_STEPS.reduce((best, step) =>
     Math.abs(step - durationSec) < Math.abs(best - durationSec) ? step : best,
@@ -1355,7 +1392,9 @@ export function estimateBrief(durationSec: number, register: number): BriefEstim
   return {
     durationSec: sec,
     register: reg,
-    tokens: c.tokensBase + sec * c.tokensPerSecond + reg * c.tokensPerRegister,
+    // register 是连续量（拨盘可以停在任意位置），所以这一项会出小数。
+    // token 是计数单位，而且同一个对象里另外三个字段都取整了。
+    tokens: Math.round(c.tokensBase + sec * c.tokensPerSecond + reg * c.tokensPerRegister),
     sources: Math.round(c.sourcesBase + (sec / 60) * c.sourcesPerMinute + reg * c.sourcesPerRegister),
     factSlots: Math.max(c.minimumFactSlots, Math.round(sec / c.secondsPerFactSlot)),
     researchMinutes: Math.round(c.minutesBase + (sec / 60) * c.minutesPerMinute + reg * c.minutesPerRegister),
@@ -1369,7 +1408,7 @@ export function estimateBrief(durationSec: number, register: number): BriefEstim
 cd pipeline && npx vitest run test/estimate.test.ts
 ```
 
-Expected: `7 passed`
+Expected: `10 passed`
 
 - [ ] **Step 5: 提交**
 
@@ -1409,8 +1448,17 @@ test("punctuation and spaces do not take time to read", () => {
   expect(estimateSeconds("央行，出手。", 5)).toBeCloseTo(estimateSeconds("央行出手", 5), 5);
 });
 
+test("spaces do not take time to read either", () => {
+  // 上一条用的是中文短句，里面根本没有空格——把正则里的 `\s` 删掉也不会红。
+  expect(estimateSeconds("hello world", 5)).toBeCloseTo(estimateSeconds("helloworld", 5), 5);
+});
+
 test("with no rate on file, the language default is used", () => {
-  expect(estimateSeconds("央行今天突然出手了", DEFAULT_CHARS_PER_SECOND.cjk)).toBeCloseTo(9 / 5.5, 5);
+  // 这两个值必须和 iOS 侧 ScriptLanguage.defaultCharactersPerSecond 一致，
+  // 否则 App 告诉用户「83 秒」、提词器却按另一个速度起步。
+  expect(DEFAULT_CHARS_PER_SECOND).toEqual({ cjk: 5, latin: 16 });
+  expect(estimateSeconds("央行今天突然出手了", DEFAULT_CHARS_PER_SECOND.cjk)).toBeCloseTo(9 / 5, 5);
+  expect(estimateSeconds("hello world", DEFAULT_CHARS_PER_SECOND.latin)).toBeCloseTo(10 / 16, 5);
 });
 
 test("a sentence-final stop is a long breath, an internal comma a short one", () => {
@@ -1452,8 +1500,18 @@ export const DEFAULT_CHARS_PER_SECOND: Record<ScriptLanguage, number> = {
   latin: 14.5,
 };
 
-const CJK = /[㐀-䶿一-鿿぀-ヿ가-힯]/u;
+const CJK = /[\u3400-\u4dbf\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/u;
 
+// 范围端点写成转义不是洁癖：\u3400 是 CJK 扩展 A 的起点、\u4e00 是基本区、
+// \u3040 是平假名、\uac00 是谚文。写成字面量的话那几个生僻字没人认得出，
+// 「这个区间到底圈了什么」这个意图就丢了。
+
+/**
+ * CJK 占字母总数的两成就算中文。iOS 侧 `ScriptLanguage.detect` 独立地也用了
+ * 两成这个阈值，但**分母口径不同**：那边是全部 unicode scalar（含数字标点），
+ * 这边只数字母。金融稿数字密集时两边可能在边界上分道扬镳——真要统一，
+ * 该先对齐分母而不是单独调这里的乘数。
+ */
 export function detectLanguage(text: string): ScriptLanguage {
   let cjk = 0;
   let letters = 0;
@@ -1464,9 +1522,21 @@ export function detectLanguage(text: string): ScriptLanguage {
   return cjk > 0 && cjk * 4 >= letters ? "cjk" : "latin";
 }
 
-/** 只数会念出声的字符——标点和空白不占时间。 */
+/**
+ * 只数会念出声的字符——标点、符号、空白都不占时间，抓取残留的零宽字符
+ * 当然也不占（`shingle.ts` 的 `normalize` 同样剥它们；同一份抓来的稿子
+ * 会同时喂给两边，不能一边当噪声一边当"要花时间念"）。
+ *
+ * **已知局限**：数字按字符计会系统性低估播报时长。「0.5」剥完标点剩 2 个
+ * 字符，念出来是「零点五」3 个音节；「5%」的 % 被当符号剥掉只剩 1 个字符，
+ * 念出来是「百分之五」4 个音节。金融口播恰好是首发场景，数字密度最高——
+ * 真要修需要一层中文数字朗读归一（基数/序数、年份逐位读、量词），
+ * 超出「确定性字符计数」这个任务的范围，记在这里。
+ */
 function spokenLength(text: string): number {
-  return [...text.replace(/[\s\p{P}\p{S}]+/gu, "")].length;
+  return [...text
+    .replace(/[\u200B-\u200D\uFEFF]/gu, "")
+    .replace(/[\s\p{P}\p{S}]+/gu, "")].length;
 }
 
 export function estimateSeconds(text: string, charsPerSecond: number): number {
@@ -1476,12 +1546,15 @@ export function estimateSeconds(text: string, charsPerSecond: number): number {
 
 export type BreathKind = "long" | "short";
 
-export interface BreathMark {
-  sentenceIndex: number;
-  kind: BreathKind;
-  /** short 气口在句内的字符位置；long 气口在句末，不带这个字段。 */
-  charOffset?: number;
-}
+/**
+ * 判别联合，不是「可选字段 + 注释约定」：short 必须带句内位置，long 必须不带。
+ * 写成 `charOffset?: number` 的话，TS 在 `kind === "long"` 分支里不会把它窄化掉，
+ * 也拦不住以后有人给 long 塞一个 charOffset。序列化成 JSON 给 Swift 端消费时
+ * 形状完全一样。
+ */
+export type BreathMark =
+  | { sentenceIndex: number; kind: "long" }
+  | { sentenceIndex: number; kind: "short"; charOffset: number };
 
 const INTERNAL = /[，、；：,;:]/u;
 
@@ -1507,7 +1580,7 @@ export function breathMarks(sentences: string[]): BreathMark[] {
 cd pipeline && npx vitest run test/prosody.test.ts
 ```
 
-Expected: `6 passed`
+Expected: `7 passed`
 
 - [ ] **Step 5: 提交**
 
