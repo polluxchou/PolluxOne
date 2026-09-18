@@ -179,5 +179,49 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     report.check(counts.strong + counts.weak + counts.unsourced == brief.sentences.count,
                  "三个数加起来等于句数，不重不漏")
 
+    report.section("句内证据锚点")
+    let s2 = brief.sentences[1]
+    let runs = AnchorRuns(s2)
+    report.check(!runs.isDegraded, "正常句子不降级")
+    report.check(runs.segments.map(\.text).joined() == s2.text,
+                 "拼回去与原句逐字相同——切分不许丢字或重复")
+    let marked = runs.segments.compactMap { $0.claimId == nil ? nil : $0.text }
+    report.check(marked.contains("0.5 个百分点"), "第一个锚点切出的就是那几个字",
+                 detail: marked.joined(separator: " / "))
+    report.check(marked.contains("3 月 15 日"), "第二个锚点")
+
+    // s3 的锚点修过一次：8/6 切出的是「金约 1 万」——跨在词尾、还劈开了数字。
+    // 把它和 s4 一起钉死，免得下次错位又绿着过去。
+    let s3Runs = AnchorRuns(brief.sentences[2])
+    let s3Marked = s3Runs.segments.compactMap { $0.claimId == nil ? nil : $0.text }
+    report.check(s3Runs.segments.map(\.text).joined() == brief.sentences[2].text,
+                 "s3 拼回去逐字相同")
+    report.check(s3Marked == ["约 1 万亿元"], "s3 的锚点切出整个数字，不劈开",
+                 detail: s3Marked.joined(separator: " / "))
+
+    let s4Runs = AnchorRuns(brief.sentences[3])
+    let s4Marked = s4Runs.segments.compactMap { $0.claimId == nil ? nil : $0.text }
+    report.check(s4Runs.segments.map(\.text).joined() == brief.sentences[3].text,
+                 "s4 拼回去逐字相同")
+    report.check(s4Marked == ["10 个基点"], "s4 的锚点",
+                 detail: s4Marked.joined(separator: " / "))
+
+    let tooLong = BriefSentence(id: "x", text: "短句。", kind: .fact,
+                                claimIds: ["c1"],
+                                anchors: [EvidenceAnchor(start: 2, length: 99, claimId: "c1")])
+    report.check(AnchorRuns(tooLong).isDegraded, "越界必须整句降级")
+    report.check(AnchorRuns(tooLong).segments.count == 1, "降级后退回一整段无标记文本")
+
+    let overlapping = BriefSentence(id: "y", text: "一二三四五六七八。", kind: .fact,
+                                    claimIds: ["c1"],
+                                    anchors: [EvidenceAnchor(start: 0, length: 4, claimId: "c1"),
+                                              EvidenceAnchor(start: 2, length: 4, claimId: "c1")])
+    report.check(AnchorRuns(overlapping).isDegraded, "重叠必须降级——重叠说明上游算错了")
+
+    let noAnchors = BriefSentence(id: "z", text: "没有锚点。", kind: .transition,
+                                  claimIds: [], anchors: [])
+    report.check(!AnchorRuns(noAnchors).isDegraded, "没有锚点不算降级")
+    report.check(AnchorRuns(noAnchors).segments.count == 1, "整句一段")
+
     return (report.pass, report.fail)
 }
