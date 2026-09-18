@@ -42,6 +42,17 @@ response_format: {"type":"json_object"}
 
 同一次实测：`completion_tokens: 259`，其中 `reasoning_tokens: 189`。**73% 的输出 token 是推理**。成本估算若只数可见输出，会低估三倍以上。Task 3 的账本必须把它算进去。
 
+### 0.35 测试代码里的下标访问要加 `!`
+
+`pipeline/tsconfig.json` 开了 `noUncheckedIndexedAccess: true`，所以 `facts[0].id`
+这类下标访问的类型是 `T | undefined`，`npm run typecheck` 会报
+"Object is possibly 'undefined'"。
+
+本计划各任务给出的测试代码里凡是有下标访问的，照抄时**加非空断言**：
+`facts[0]!.id`、`rejected[0]!.reason`。这只动类型层面，**断言的值和语义一个都不要改**。
+
+仓库原有的 12 个测试文件恰好从没用过下标访问，所以这个坑到 Task 6 才第一次暴露。
+
 ### 0.4 错误方向
 
 沿用上一个计划的判据。本计划里三处最危险：
