@@ -38,13 +38,13 @@ pipeline/
   tsconfig.json
   src/
     domain/
-      types.ts                 Source · Fact · Claim · DraftSentence 等纯类型
+      types.ts                 Source · Fact · MergedClaim · VerifiedClaim · DraftSentence
       estimate.ts              §10.1 estimateBrief（纯函数）
       prosody.ts               ⑨ 语种判定 · 秒数 · 气口
     dedupe/
       shingle.ts               归一化 · 5-gram/2-gram shingle · Jaccard
       independence.ts          ⑤ 信源分组（并查集）+ 独立源计数
-      merge.ts                 ④ Fact → Claim 归并（数字签名 + Jaccard）
+      merge.ts                 ④ Fact → MergedClaim 归并（数字签名 + Jaccard）
       conflict.ts              ⑤ 确定性数字冲突
       classify.ts              ⑤ confidence 判定（strong/weak/conflicted）
     draft/
@@ -190,11 +190,22 @@ export interface Fact {
 
 export type Confidence = "strong" | "weak" | "conflicted";
 
-/** 归并后的事实点。`independence` 是互不相关的信源组数量，不是信源条数。 */
-export interface Claim {
+/** ④ 归并的产物。此时还不知道有几个独立源，也还不知道敢不敢播。 */
+export interface MergedClaim {
   id: ClaimId;
   text: string;
   factIds: FactId[];
+}
+
+/**
+ * ⑤ 交叉验证的产物。`independence` 是互不相关的信源组数量，不是信源条数。
+ *
+ * 和 MergedClaim 分开是有意的：④ 出来的东西还不知道有几个独立源。若两者共用
+ * 一个类型，就得先塞一个 `independence: 0` 的占位值——那是**一个关于自己
+ * 有多少信源的谎**。在一个以可溯源为唯一承诺的产品里，这种中间态不该在
+ * 类型上存在。
+ */
+export interface VerifiedClaim extends MergedClaim {
   independence: number;
   confidence: Confidence;
   conflictsWith: ClaimId[];
@@ -245,6 +256,17 @@ test("normalize strips punctuation and whitespace, keeps characters", () => {
   expect(normalize("央行宣布：下调 0.5 个百分点。")).toBe("央行宣布下调05个百分点");
 });
 
+test("full-width digits fold onto their ASCII forms", () => {
+  // 中文媒体里全角数字很常见。不折叠的话，同一件事写成 ０５ 和 05
+  // 会得到零重叠——两篇一模一样的稿会被判成互相独立的两个源。
+  expect(normalize("降准０．５个百分点")).toBe(normalize("降准0.5个百分点"));
+  expect(normalize("释放资金１万亿")).toBe("释放资金1万亿");
+});
+
+test("zero-width characters left over from scraping do not affect the fingerprint", () => {
+  expect(normalize("降准\u200B零点五\uFEFF个百分点")).toBe("降准零点五个百分点");
+});
+
 test("identical text has jaccard 1", () => {
   const a = shingles("下调存款准备金率０点五个百分点", 5);
   expect(jaccard(a, a)).toBe(1);
@@ -256,10 +278,19 @@ test("unrelated text has jaccard 0", () => {
   expect(jaccard(a, b)).toBe(0);
 });
 
+test("partial overlap gives the exact ratio, pinning the union formula", () => {
+  // abcdefg → abc bcd cde def efg（5 个）
+  // cdefghi → cde def efg fgh ghi（5 个）
+  // 共享 3 个，并集 5 + 5 − 3 = 7
+  expect(jaccard(shingles("abcdefg", 3), shingles("cdefghi", 3))).toBeCloseTo(3 / 7, 10);
+});
+
 test("a repost that only changed its lede still scores high", () => {
   const wire = "央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。";
   const repost = "【快讯】央行今日宣布下调金融机构存款准备金率零点五个百分点，此次降准将释放长期资金约一万亿元，自三月十五日起生效。";
-  expect(jaccard(shingles(wire, 5), shingles(repost, 5))).toBeGreaterThan(0.9);
+  // 实测 46/48。钉到小数点后三位，这样改错了并集公式会当场失败——
+  // 原来的 > 0.9 太松，`shared/(union+1)` 之类的错能混过去。
+  expect(jaccard(shingles(wire, 5), shingles(repost, 5))).toBeCloseTo(0.9583, 3);
 });
 
 test("two texts with no shingles at all are treated as identical", () => {
@@ -287,11 +318,24 @@ export const BODY_SHINGLE_K = 5;
 export const TEXT_SHINGLE_K = 2;
 
 /**
- * 去掉空白与所有标点/符号，只留会影响语义的字符。
- * 中文没有词边界，逐字符 shingle 比分词更稳，也不用引依赖。
+ * 归一化到「只剩会影响语义的字符」。三步：
+ *
+ * 1. `NFKC` 把全角折成半角。中文媒体里全角数字很常见，不折叠的话同一件事
+ *    写成 ０５ 和 05 会得到零重叠，两篇一模一样的稿会被判成互相独立的两个源。
+ *    这是 JS 内置的，不引依赖。
+ * 2. 去掉抓取残留的零宽字符（NFKC 不管这些）。
+ * 3. 去掉空白与所有标点/符号。
+ *
+ * 中文没有词边界，逐字符 shingle 比分词更稳，也不用引分词依赖。
+ *
+ * **已知局限**：中文数字不会折成阿拉伯数字（「零点五」≠「0.5」）。
+ * 真要处理得往上加一层数字归一，不在本包范围内。
  */
 export function normalize(text: string): string {
-  return text.replace(/[\s\p{P}\p{S}]+/gu, "");
+  return text
+    .normalize("NFKC")
+    .replace(/[\u200B-\u200D\uFEFF]/gu, "")
+    .replace(/[\s\p{P}\p{S}]+/gu, "");
 }
 
 export function shingles(text: string, k: number): Set<string> {
@@ -317,7 +361,7 @@ export function jaccard(a: Set<string>, b: Set<string>): number {
 cd pipeline && npx vitest run test/shingle.test.ts
 ```
 
-Expected: `5 passed`
+Expected: `8 passed`
 
 - [ ] **Step 5: 提交**
 
@@ -388,6 +432,13 @@ test("a media group table collapses sibling outlets", () => {
   ];
   const groups = groupSources(sources, { "outlet-a": "group-x", "outlet-b": "group-x" });
   expect(groups).toHaveLength(1);
+});
+
+test("sources too short to fingerprint are never merged by fingerprint", () => {
+  // 抓取失败的两条新闻各自产不出 shingle。两个空集的 Jaccard 是 1，
+  // 所以这里必须靠 groupSources 的守卫挡住，否则独立源数会少算。
+  const sources = [src("s0", "portal-a", "无正文"), src("s1", "portal-b", "")];
+  expect(groupSources(sources)).toHaveLength(2);
 });
 
 test("genuinely independent reporting stays separate", () => {
@@ -474,7 +525,13 @@ export function groupSources(
       const b = sources[j]!;
 
       // 规则 1：正文指纹相似 —— 同一份稿的转载
-      if (jaccard(prints[i]!, prints[j]!) >= SAME_SOURCE_JACCARD) {
+      //
+      // 先要求两边都产出了指纹。抓取失败或正文短于 k 的源产不出 shingle，
+      // 而**两个空集的 Jaccard 是 1**——不挡的话，两条毫不相干的新闻会被
+      // 并成一个源，独立源数就少算了。jaccard 是纯算术函数，「什么叫一个
+      // 信源」的判断属于这里。
+      if (prints[i]!.size > 0 && prints[j]!.size > 0
+        && jaccard(prints[i]!, prints[j]!) >= SAME_SOURCE_JACCARD) {
         union(i, j);
         continue;
       }
@@ -515,7 +572,7 @@ export function independenceOf(cited: SourceId[], groups: SourceGroup[]): number
 cd pipeline && npx vitest run test/independence.test.ts
 ```
 
-Expected: `6 passed`
+Expected: `7 passed`
 
 - [ ] **Step 5: 提交**
 
@@ -615,7 +672,7 @@ Expected: FAIL，报 `Failed to resolve import "../src/dedupe/merge.js"`
 `pipeline/src/dedupe/merge.ts`：
 
 ```ts
-import type { Claim, Fact } from "../domain/types.js";
+import type { Fact, MergedClaim } from "../domain/types.js";
 import { jaccard, shingles, TEXT_SHINGLE_K } from "./shingle.js";
 
 /** 数字一致时，文本相似到这个值就算同一件事。 */
@@ -639,9 +696,9 @@ function sameNumbers(a: string[], b: string[]): boolean {
 
 /**
  * ④ 归并：说同一件事的 Fact 合成一个 Claim。
- * 出来的 Claim 还没有 independence 和 confidence——那是 ⑤ 的事。
+ * 返回 MergedClaim——independence 和 confidence 是 ⑤ 的事，这里连字段都没有。
  */
-export function mergeFacts(facts: Fact[]): Claim[] {
+export function mergeFacts(facts: Fact[]): MergedClaim[] {
   const parent = facts.map((_, i) => i);
   const find = (i: number): number => {
     let root = i;
@@ -684,10 +741,7 @@ export function mergeFacts(facts: Fact[]): Claim[] {
       id: `c${n}`,
       text: facts[longest]!.text,
       factIds: indices.map((i) => facts[i]!.id),
-      independence: 0,
-      confidence: "weak",
-      conflictsWith: [],
-    } satisfies Claim;
+    } satisfies MergedClaim;
   });
 }
 ```
@@ -723,11 +777,11 @@ spec §5.1 举的例子就是这个：路透 23 亿 vs 彭博 31 亿。**最危�
 
 ```ts
 import { expect, test } from "vitest";
-import type { Claim } from "../src/domain/types.js";
+import type { MergedClaim } from "../src/domain/types.js";
 import { findNumericConflicts } from "../src/dedupe/conflict.js";
 
-function claim(id: string, text: string): Claim {
-  return { id, text, factIds: [], independence: 1, confidence: "weak", conflictsWith: [] };
+function claim(id: string, text: string): MergedClaim {
+  return { id, text, factIds: [] };
 }
 
 test("same claim, different figure — the Reuters vs Bloomberg case", () => {
@@ -778,7 +832,7 @@ Expected: FAIL，报 `Failed to resolve import "../src/dedupe/conflict.js"`
 `pipeline/src/dedupe/conflict.ts`：
 
 ```ts
-import type { Claim, ClaimId } from "../domain/types.js";
+import type { ClaimId, MergedClaim } from "../domain/types.js";
 import { MERGE_JACCARD, numericSignature } from "./merge.js";
 import { jaccard, shingles, TEXT_SHINGLE_K } from "./shingle.js";
 
@@ -790,7 +844,7 @@ import { jaccard, shingles, TEXT_SHINGLE_K } from "./shingle.js";
  *
  * 语义冲突（同一件事、说法相反、没有数字）检不出来，那需要模型，见下一个计划。
  */
-export function findNumericConflicts(claims: Claim[]): [ClaimId, ClaimId][] {
+export function findNumericConflicts(claims: MergedClaim[]): [ClaimId, ClaimId][] {
   const prints = claims.map((c) => shingles(c.text, TEXT_SHINGLE_K));
   const numbers = claims.map((c) => numericSignature(c.text));
   const pairs: [ClaimId, ClaimId][] = [];
@@ -839,7 +893,7 @@ git commit -m "Catch the two outlets that disagree about a number"
 
 ```ts
 import { expect, test } from "vitest";
-import type { Claim, Fact, Source } from "../src/domain/types.js";
+import type { Fact, MergedClaim, Source } from "../src/domain/types.js";
 import { classifyClaims, STRONG_INDEPENDENCE } from "../src/dedupe/classify.js";
 
 const BODIES: Record<string, string> = {
@@ -854,8 +908,8 @@ function src(id: string, publisher: string): Source {
 function fact(id: string, sourceId: string): Fact {
   return { id, sourceId, text: "t", quote: "t" };
 }
-function claim(id: string, factIds: string[]): Claim {
-  return { id, text: "涉及金额约 23 亿美元", factIds, independence: 0, confidence: "weak", conflictsWith: [] };
+function claim(id: string, factIds: string[]): MergedClaim {
+  return { id, text: "涉及金额约 23 亿美元", factIds };
 }
 
 test("three independent groups make a claim strong", () => {
@@ -877,7 +931,7 @@ test("a single source makes a claim weak, however many reposts back it", () => {
 test("a numeric conflict overrides independence entirely", () => {
   const sources = [src("s0", "pbc"), src("s1", "reuters"), src("s2", "caixin")];
   const facts = [fact("f0", "s0"), fact("f1", "s1"), fact("f2", "s2")];
-  const claims: Claim[] = [
+  const claims: MergedClaim[] = [
     { ...claim("c0", ["f0", "f1", "f2"]), text: "涉及金额约 23 亿美元" },
     { ...claim("c1", ["f0", "f1", "f2"]), text: "涉及金额约 31 亿美元" },
   ];
@@ -901,7 +955,7 @@ Expected: FAIL，报 `Failed to resolve import "../src/dedupe/classify.js"`
 `pipeline/src/dedupe/classify.ts`：
 
 ```ts
-import type { Claim, ClaimId, Fact, Source } from "../domain/types.js";
+import type { ClaimId, Fact, MergedClaim, Source, VerifiedClaim } from "../domain/types.js";
 import { findNumericConflicts } from "./conflict.js";
 import { groupSources, independenceOf } from "./independence.js";
 
@@ -913,11 +967,11 @@ export const STRONG_INDEPENDENCE = 3;
  * 冲突优先级最高——三个独立源都说的话，只要和另一条数字打架，照样不进稿。
  */
 export function classifyClaims(
-  claims: Claim[],
+  claims: MergedClaim[],
   facts: Fact[],
   sources: Source[],
   mediaGroups: Record<string, string> = {},
-): Claim[] {
+): VerifiedClaim[] {
   const groups = groupSources(sources, mediaGroups);
   const sourceOfFact = new Map(facts.map((f) => [f.id, f.sourceId]));
 
@@ -941,7 +995,7 @@ export function classifyClaims(
       confidence: against.length > 0
         ? "conflicted"
         : independence >= STRONG_INDEPENDENCE ? "strong" : "weak",
-    } satisfies Claim;
+    } satisfies VerifiedClaim;
   });
 }
 ```
@@ -1005,7 +1059,8 @@ test("the 3:00 偏专业 anchor", () => {
   expect(e.tokens).toBe(175500);
   expect(e.sources).toBe(21);
   expect(e.factSlots).toBe(7);
-  expect(e.researchMinutes).toBe(8);
+  // 2 + 3×1.2 + 0.75×2.5 = 7.475 → 7
+  expect(e.researchMinutes).toBe(7);
 });
 
 test("both axes only ever push cost up", () => {
@@ -1159,9 +1214,10 @@ test("with no rate on file, the language default is used", () => {
 });
 
 test("a sentence-final stop is a long breath, an internal comma a short one", () => {
+  // 「，」在 下0 调1 准2 备3 金4 率5 ，6 —— charOffset 是 6
   expect(breathMarks(["央行今天突然出手了。", "下调准备金率，三月生效。"])).toEqual([
     { sentenceIndex: 0, kind: "long" },
-    { sentenceIndex: 1, kind: "short", charOffset: 7 },
+    { sentenceIndex: 1, kind: "short", charOffset: 6 },
     { sentenceIndex: 1, kind: "long" },
   ]);
 });
@@ -1274,10 +1330,10 @@ git commit -m "Say how long a script takes and where the breaths fall"
 
 ```ts
 import { expect, test } from "vitest";
-import type { Claim, Confidence } from "../src/domain/types.js";
+import type { Confidence, VerifiedClaim } from "../src/domain/types.js";
 import { selectClaims } from "../src/draft/select.js";
 
-function claim(id: string, confidence: Confidence, independence: number): Claim {
+function claim(id: string, confidence: Confidence, independence: number): VerifiedClaim {
   return { id, text: id, factIds: [], independence, confidence, conflictsWith: [] };
 }
 
@@ -1353,7 +1409,7 @@ Expected: FAIL，报 `Failed to resolve import "../src/draft/select.js"`
 `pipeline/src/draft/select.ts`：
 
 ```ts
-import type { Claim, ClaimId } from "../domain/types.js";
+import type { ClaimId, VerifiedClaim } from "../domain/types.js";
 
 /** 一篇稿至少要有这么多条 strong 打底，无论拨到多长。spec §5.1。 */
 export const MINIMUM_STRONG_CLAIMS = 3;
@@ -1371,10 +1427,10 @@ export interface Selection {
  * ⑥ 的确定性一半：谁**有资格**进稿、够不够出稿。
  * 至于进稿的这几条怎么排、钩子怎么下，那是编辑判断，交给模型（下一个计划）。
  */
-export function selectClaims(claims: Claim[], factSlots: number): Selection {
+export function selectClaims(claims: VerifiedClaim[], factSlots: number): Selection {
   const conflicted = claims.filter((c) => c.confidence === "conflicted").map((c) => c.id);
 
-  const byCorroboration = (a: Claim, b: Claim) =>
+  const byCorroboration = (a: VerifiedClaim, b: VerifiedClaim) =>
     b.independence - a.independence || a.id.localeCompare(b.id);
 
   const strong = claims.filter((c) => c.confidence === "strong").sort(byCorroboration);
@@ -1704,7 +1760,7 @@ import { classifyClaims } from "./dedupe/classify.js";
 import { mergeFacts } from "./dedupe/merge.js";
 import { estimateBrief, type BriefEstimate } from "./domain/estimate.js";
 import { breathMarks, estimateSeconds, type BreathMark } from "./domain/prosody.js";
-import type { Claim, DraftSentence, Fact, Source } from "./domain/types.js";
+import type { DraftSentence, Fact, Source, VerifiedClaim } from "./domain/types.js";
 import { bindEvidence, type BindResult } from "./draft/bind.js";
 import { selectClaims, type Selection } from "./draft/select.js";
 
@@ -1722,7 +1778,7 @@ export interface CoreInput {
 
 export interface CoreResult {
   estimate: BriefEstimate;
-  claims: Claim[];
+  claims: VerifiedClaim[];
   selection: Selection;
   verdict: Selection["verdict"];
   bind: BindResult;
