@@ -22,7 +22,6 @@ export interface CoreResult {
   estimate: BriefEstimate;
   claims: VerifiedClaim[];
   selection: Selection;
-  verdict: Selection["verdict"];
   bind: BindResult;
   seconds: number;
   breaths: BreathMark[];
@@ -36,10 +35,15 @@ export function buildBrief(input: CoreInput): CoreResult {
   const estimate = estimateBrief(input.durationSec, input.register);
 
   const merged = mergeFacts(input.facts);
-  const claims = classifyClaims(merged, input.facts, input.sources, input.mediaGroups ?? {});
+  const claims = classifyClaims(merged, input.facts, input.sources, input.mediaGroups);
   const selection = selectClaims(claims, estimate.factSlots);
 
-  // 即便 insufficient 也照样跑绑定与时长：问题要浮出来，不能被一个 verdict 盖掉
+  // 即便 insufficient 也照样跑绑定与时长：问题要浮出来，不能被一个 verdict 盖掉。
+  //
+  // 这里喂给 bind 的是**全部通过验证的** claim，不是 selection.picked——两个阶段
+  // 管的事不同：selection 决定「在这个长度里谁配进稿」，bind 决定「这条引用是不是
+  // 真的」。若改用 picked，insufficient 时 picked 是空的，于是每一句事实句都会报
+  // unknown-claim，把「模型编了一句」这个唯一该浮出来的信号淹掉。
   const verifiedIds = claims.filter((c) => c.confidence !== "conflicted").map((c) => c.id);
   const bind = bindEvidence(input.draft, verifiedIds);
 
@@ -48,7 +52,6 @@ export function buildBrief(input: CoreInput): CoreResult {
     estimate,
     claims,
     selection,
-    verdict: selection.verdict,
     bind,
     seconds: texts.reduce((total, t) => total + estimateSeconds(t, input.charsPerSecond), 0),
     breaths: breathMarks(texts),
