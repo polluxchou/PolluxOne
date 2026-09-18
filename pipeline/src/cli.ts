@@ -1,6 +1,22 @@
 import { readFileSync, realpathSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { loadConfig, type Config } from "./config/env.js";
 import { buildBrief, type CoreInput } from "./core.js";
+import { DEFAULT_CHARS_PER_SECOND } from "./domain/prosody.js";
+import { DeepSeekClient } from "./models/deepseek.js";
+import { TokenLedger } from "./models/ledger.js";
+import { SearchClient } from "./models/search.js";
+import { readArticle } from "./net/jina.js";
+import { runPipeline, type Ports, type RunOptions } from "./run.js";
+import {
+  buildConflictPrompt,
+  pairsToCheck,
+  parseConflictReply,
+  type ConflictReply,
+} from "./stages/conflict.js";
+import { buildDraftPrompt } from "./stages/draft.js";
+import { buildExtractPrompt, parseExtractReply, type ExtractReply } from "./stages/extract.js";
+import { validateDraft } from "./stages/validate-draft.js";
 
 /**
  * 从磁盘读进来的东西只是**形状像** CoreInput，`as` 一个检查都不做。
@@ -38,6 +54,10 @@ function validate(raw: unknown, path: string): CoreInput {
   return input;
 }
 
+const USAGE =
+  "usage: brief <fixture.json>              离线跑确定性内核，不花钱\n" +
+  "       brief <https://…> [秒数] [语气]   真 URL，会调模型、会花钱\n";
+
 /**
  * 把一份固定数据跑过确定性内核，结果打到 stdout。
  *
@@ -51,7 +71,7 @@ function validate(raw: unknown, path: string): CoreInput {
 export function main(argv: string[]): number {
   const path = argv[2];
   if (path === undefined) {
-    process.stderr.write("usage: brief <fixture.json>\n");
+    process.stderr.write(USAGE);
     return 2;
   }
 
@@ -80,10 +100,154 @@ export function main(argv: string[]): number {
   return 0;
 }
 
+// ——— 下面是真 URL 那条路。走到这里就会发请求、会调模型、会产生账单。———
+
+/** 抽事实和判冲突量大而结构简单，用便宜的；成稿只有一次，用贵的。 */
+const EXTRACT_MODEL = "deepseek-flash";
+const CONFLICT_MODEL = "deepseek-flash";
+const DRAFT_MODEL = "deepseek-v4-pro";
+
+/**
+ * `.env.local` 就在这个文件的上一层，**按模块位置解析而不是按 cwd**：
+ * `loadConfig` 的默认值 "pipeline/.env.local" 只在仓库根目录下成立，
+ * 而 `npm run brief` 的 cwd 恰恰是 pipeline/。
+ */
+const ENV_PATH = fileURLToPath(new URL("../.env.local", import.meta.url));
+
+/**
+ * 把真实的网络和模型装进 `Ports`。**只有这个函数知道有网络这回事**——
+ * `run.ts` 从头到尾一次请求都不发，所以它的测试才能全程离线。
+ */
+export function livePorts(config: Config, ledger: TokenLedger): Ports {
+  const deepseek = new DeepSeekClient(config.deepseek, ledger);
+  const search = new SearchClient(config.anthropic.apiKey, ledger);
+
+  const draftOnce = async (prompt: string, allowed: Set<string>) =>
+    validateDraft(
+      await deepseek.json<{ sentences?: unknown }>("draft", DRAFT_MODEL, prompt),
+      allowed,
+    );
+
+  return {
+    readArticle: (url) => readArticle(url),
+    findSources: (headline) => search.findSources(headline),
+
+    extractFacts: async (source) =>
+      parseExtractReply(
+        source,
+        await deepseek.json<ExtractReply>("extract", EXTRACT_MODEL, buildExtractPrompt(source)),
+      ),
+
+    findSemanticConflicts: async (claims) => {
+      // 内核目前收不下这个结果（见 run.ts 里 Ports 上的注释），所以这一支
+      // 还没有调用方。实现照样写在这里：缺口在接线上，不在这一步本身。
+      const pairs = pairsToCheck(claims);
+      if (pairs.length === 0) return [];
+      const reply = await deepseek.json<ConflictReply>(
+        "conflict",
+        CONFLICT_MODEL,
+        buildConflictPrompt(claims, pairs),
+      );
+      return parseConflictReply(reply, new Set(claims.map((c) => c.id)));
+    },
+
+    draftScript: async (claims, durationSec, register) => {
+      const prompt = buildDraftPrompt(claims, durationSec, register);
+      // conflicted 的 claim 既没进 prompt，也不许出现在稿子里。
+      const allowed = new Set(claims.filter((c) => c.confidence !== "conflicted").map((c) => c.id));
+
+      const first = await draftOnce(prompt, allowed);
+      if (first.ok) return first.sentences;
+
+      // §6.2 只有我们自己的校验器兜着（DeepSeek 不支持 json_schema），
+      // 所以这里是**拒收+重跑**，不是"尽量"。问题一次报全，重跑才有意义。
+      const complaint = first.problems
+        .map((p) => `${p.index < 0 ? "整体" : `第 ${p.index + 1} 句`}：${p.kind}（${p.detail}）`)
+        .join("\n");
+      const second = await draftOnce(
+        `${prompt}\n\n上一版被退回了，逐条改掉下面的问题再输出一遍：\n${complaint}`,
+        allowed,
+      );
+      if (second.ok) return second.sentences;
+
+      // 两次都过不了校验就出错，不许把没通过校验的稿子发出去。
+      throw new Error(
+        `成稿两次都没通过校验：\n${second.problems.map((p) => `${p.kind} ${p.detail}`).join("\n")}`,
+      );
+    },
+  };
+}
+
+function parseNumber(raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error(`不是一个数：${raw}`);
+  return value;
+}
+
+/**
+ * 真 URL 那条路。退出码和 fixture 那条一致：
+ * 0 正常（含「不建议播」——那是产品结论，不是故障）· 1 出稿了但绑定失败 · 2 出错。
+ */
+export async function briefFromUrl(url: string, argv: string[]): Promise<number> {
+  const ledger = new TokenLedger();
+  let options: RunOptions;
+  let config: Config;
+  try {
+    options = {
+      durationSec: parseNumber(argv[3], 60),
+      register: parseNumber(argv[4], 0.5),
+      // 抓到正文之前无从判断语种，只能先用中文的回落值。spec §9.2 ①。
+      charsPerSecond: DEFAULT_CHARS_PER_SECOND.cjk,
+    };
+    config = loadConfig(ENV_PATH);
+  } catch (error) {
+    process.stderr.write(`${(error as Error).message}\n`);
+    return 2;
+  }
+
+  let result;
+  try {
+    result = await runPipeline(url, options, livePorts(config, ledger));
+  } catch (error) {
+    process.stderr.write(`${url}: pipeline failed: ${(error as Error).message}\n`);
+    return 2;
+  } finally {
+    // 账单先打出来：管线中途抛错，花掉的 token 一样要给用户看见。
+    process.stderr.write(
+      `tokens: ${JSON.stringify(ledger.totals())}  约 ${ledger.totalCostCents().toFixed(2)} 美分\n`,
+    );
+  }
+
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+
+  if (result.status === "insufficient") {
+    process.stderr.write(`不建议播：${result.reason}\n`);
+    return 0;
+  }
+  if (result.core.selection.verdict === "ok" && !result.core.bind.ok) return 1;
+  return 0;
+}
+
+/** 分派：`http` 开头走真 URL，其余仍是那条一分钱不花的 fixture 路。 */
+export async function runCli(argv: string[]): Promise<number> {
+  const target = argv[2];
+  if (target !== undefined && target.startsWith("http")) return briefFromUrl(target, argv);
+  return main(argv);
+}
+
 // 只有被当作脚本直接跑时才退出进程；被 import（测试）时什么都不做。
 // realpathSync 是必须的：macOS 上 /tmp 是 /private/tmp 的符号链接，
 // 不解开的话 argv[1] 和 import.meta.url 对不上，守卫会恒假。
 const entry = process.argv[1];
 if (entry !== undefined && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
-  process.exit(main(process.argv));
+  // 真 URL 那条路是异步的，异常必须在这里收住：未捕获的 rejection 默认退出码
+  // 是 1，会和「出稿了但绑定失败」撞车，CI 就分不清是网络挂了还是绑定坏了。
+  void runCli(process.argv).then(
+    (code) => process.exit(code),
+    (error: Error) => {
+      process.stderr.write(`${error.message}\n`);
+      process.exit(2);
+    },
+  );
 }
