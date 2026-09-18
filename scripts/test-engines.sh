@@ -28,6 +28,10 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/TextTokenizer.swift" \
   "$IOS/Domain/VoiceCommand.swift" \
   "$IOS/Domain/TakeArchive.swift" \
+  "$IOS/Domain/Brief/BriefModels.swift" \
+  "$IOS/Domain/Brief/Evidence.swift" \
+  "$IOS/Domain/Brief/BriefStage.swift" \
+  "$IOS/Domain/Brief/BriefFixture.swift" \
   "$IOS/Engines/ScriptAlignmentEngine.swift" \
   "$IOS/Engines/ReadingPacer.swift" \
   "$IOS/Engines/TeleprompterEngine.swift" \
@@ -42,6 +46,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   ios/EngineHarness/ArchiveScenarios.swift \
   ios/EngineHarness/LayoutScenarios.swift \
   ios/EngineHarness/PacingScenarios.swift \
+  ios/EngineHarness/BriefScenarios.swift \
   ios/EngineHarness/main.swift \
   -o "$OUT/engine_harness"
 

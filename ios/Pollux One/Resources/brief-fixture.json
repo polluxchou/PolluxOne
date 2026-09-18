@@ -1,0 +1,87 @@
+{
+  "id": "b-fixture-1",
+  "news": {
+    "publisher": "财新",
+    "title": "央行宣布下调存款准备金率 0.5 个百分点",
+    "url": "https://example.caixin.com/2026-09-18/rrr-cut.html"
+  },
+  "status": "ready",
+  "estimatedSeconds": 83,
+  "pacedToUser": true,
+  "sentences": [
+    { "id": "s1", "text": "央行今天突然出手了。", "kind": "transition", "claimIds": [], "anchors": [] },
+    {
+      "id": "s2",
+      "text": "下调存款准备金率0.5 个百分点，3 月 15 日正式生效。",
+      "kind": "fact",
+      "claimIds": ["c1", "c2"],
+      "anchors": [
+        { "start": 8, "length": 8, "claimId": "c1" },
+        { "start": 17, "length": 8, "claimId": "c2" }
+      ]
+    },
+    {
+      "id": "s3",
+      "text": "这次将释放长期资金约 1 万亿元。",
+      "kind": "fact",
+      "claimIds": ["c1"],
+      "anchors": [{ "start": 8, "length": 6, "claimId": "c1" }]
+    },
+    {
+      "id": "s4",
+      "text": "有机构测算，这可能让按揭利率再降10 个基点。",
+      "kind": "fact",
+      "claimIds": ["c3"],
+      "anchors": [{ "start": 16, "length": 6, "claimId": "c3" }]
+    },
+    { "id": "s5", "text": "我的判断是，这一轮宽松还没到头。", "kind": "opinion", "claimIds": [], "anchors": [] }
+  ],
+  "claims": {
+    "c1": {
+      "id": "c1",
+      "independence": 3,
+      "mergedAwayCount": 6,
+      "sources": [
+        { "publisher": "中国人民银行", "note": "公告原文", "time": "15:02" },
+        { "publisher": "新华社", "note": "「释放长期资金约1万亿」", "time": "15:20" },
+        { "publisher": "财新网", "note": "独立测算，口径一致", "time": "16:41" }
+      ]
+    },
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 2,
+      "sources": [
+        { "publisher": "中国人民银行", "note": "公告原文", "time": "15:02" },
+        { "publisher": "新华社", "note": "「自3月15日起执行」", "time": "15:20" },
+        { "publisher": "第一财经", "note": "生效日一致", "time": "16:05" }
+      ]
+    },
+    "c3": {
+      "id": "c3",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [{ "publisher": "某券商研报", "note": "「或再降10个基点」", "time": "17:30" }]
+    }
+  },
+  "stages": [
+    { "name": "抓取原文",   "state": "done",    "count": "1 篇",           "detail": null },
+    { "name": "扩展检索",   "state": "done",    "count": "14 篇",          "detail": null },
+    { "name": "抽取事实点", "state": "done",    "count": "86 条",          "detail": null },
+    { "name": "归并去重",   "state": "done",    "count": "23 点 · 7 独立源", "detail": null },
+    { "name": "交叉验证",   "state": "running", "count": "9 / 23",
+      "detail": "「降准释放长期资金约 1 万亿元」——3 个独立信源对上了" },
+    { "name": "选点",       "state": "pending", "count": null, "detail": null },
+    { "name": "成稿",       "state": "pending", "count": null, "detail": null },
+    { "name": "挂信源",     "state": "pending", "count": null, "detail": null },
+    { "name": "时长与气口", "state": "pending", "count": null, "detail": null }
+  ],
+  "budget": {
+    "used": 48240,
+    "budgeted": 120000,
+    "remainingThisMonth": 2410000,
+    "costCents": 14,
+    "byStage": { "抓取原文": 40, "扩展检索": 3900, "抽取事实点": 38100, "成稿": 6200 }
+  },
+  "insufficientReason": null
+}
