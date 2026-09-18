@@ -124,7 +124,13 @@ struct RecordingView: View {
             }
         }
         .onChange(of: viewModel.activeParameter) { _, _ in scheduleFocusReticleHide() }
-        .onDisappear { viewModel.sessionManager.teardown() }
+        // Deliberately no `onDisappear { sessionManager.teardown() }`: the
+        // session belongs to the app now, not to this view, and teardown stops
+        // the capture session and deactivates the audio session outright. That
+        // was right while this screen owned the session and was pushed from the
+        // script list; as the root it would instead have fired the first time
+        // anything covered the camera — a push out of the corner slot — and
+        // killed the global camera behind the screen that pushed it.
     }
 
     // MARK: - Layers

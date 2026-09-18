@@ -6,16 +6,13 @@ import SwiftUI
 struct ScriptListView: View {
     // The capture session is app-lifetime now, so this screen hands the one
     // that already exists to RecordingView rather than letting it build its
-    // own. Read from the environment because RootView's call site belongs to
-    // another change in flight.
+    // own.
     @Environment(AppEnvironment.self) private var environment
     @State private var viewModel: ScriptListViewModel
     private let syncService: ScriptSyncService
-    private let takeArchiver: TakeArchiver
 
-    init(syncService: ScriptSyncService, takeArchiver: TakeArchiver) {
+    init(syncService: ScriptSyncService) {
         self.syncService = syncService
-        self.takeArchiver = takeArchiver
         _viewModel = State(wrappedValue: ScriptListViewModel(syncService: syncService))
     }
 

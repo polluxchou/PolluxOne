@@ -6,9 +6,9 @@ struct RootView: View {
     var body: some View {
         Group {
             if environment.currentUser != nil {
-                ScriptListView(
-                    syncService: environment.syncService,
-                    takeArchiver: environment.takeArchiver
+                RecordingView(
+                    script: environment.sessionManager.scriptRevision?.script,
+                    sessionManager: environment.sessionManager
                 )
             } else {
                 LoginView()
