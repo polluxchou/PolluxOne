@@ -2,6 +2,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, type Config } from "./config/env.js";
 import { buildBrief, type CoreInput } from "./core.js";
+import { findNumericConflicts } from "./dedupe/conflict.js";
 import { DEFAULT_CHARS_PER_SECOND } from "./domain/prosody.js";
 import { DeepSeekClient } from "./models/deepseek.js";
 import { TokenLedger } from "./models/ledger.js";
@@ -141,7 +142,9 @@ export function livePorts(config: Config, ledger: TokenLedger): Ports {
     findSemanticConflicts: async (claims) => {
       // 判决权在代码：模型只回一个二分类，冲突图由 parseConflictReply 构造，
       // 再由 runPipeline 经 CoreInput.externalConflicts 并进内核的冲突图。
-      const pairs = pairsToCheck(claims);
+      // 数字层已经判掉的对不必再问模型：那一层是代码判的，比模型可靠也免费。
+      // pairsToCheck 的第二个参数就是为此存在的，不传等于每次都为已知结论再付一次钱。
+      const pairs = pairsToCheck(claims, findNumericConflicts(claims));
       if (pairs.length === 0) return [];
       const reply = await deepseek.json<ConflictReply>(
         "conflict",
