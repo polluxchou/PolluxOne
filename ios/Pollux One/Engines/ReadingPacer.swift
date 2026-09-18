@@ -30,6 +30,26 @@ final class ReadingPacer {
     /// Measured reading speed in characters per second.
     private(set) var rate: Double
 
+    /// 一次 take 结束时导出的语速样本。带语种，因为中英文的字符/秒差三倍以上。
+    struct Sample: Equatable {
+        let language: ScriptLanguage
+        let charsPerSecond: Double
+    }
+
+    /// 少于这个数不导出。样本太少时 rate 还基本是种子值，
+    /// 把它当成"这个用户的语速"存进去，等于用默认值污染中位数。
+    static let minimumSampleCount = 8
+
+    /// 实际被采纳的样本数——只有 correct() 里那个 `sample > 0` 分支走到才加。
+    private(set) var acceptedSampleCount = 0
+
+    /// 会话内状态导出成一个可以落库的样本。不够可信就返回 nil：
+    /// 一个不可信的数混进近 10 次的中位数里，比少一个样本更糟。
+    func exportSample() -> Sample? {
+        guard acceptedSampleCount >= Self.minimumSampleCount else { return nil }
+        return Sample(language: language, charsPerSecond: rate)
+    }
+
     private var language: ScriptLanguage
     private var lastTruth: Double = 0
     private var lastTruthTime: TimeInterval?
@@ -56,6 +76,7 @@ final class ReadingPacer {
         rate = language.defaultCharactersPerSecond
         lastTruth = offset
         lastTruthTime = nil
+        acceptedSampleCount = 0
     }
 
     /// Advance by one display tick.
@@ -127,6 +148,7 @@ final class ReadingPacer {
             if sample > 0 {
                 let blended = rate * (1 - rateSmoothing) + sample * rateSmoothing
                 rate = min(max(blended, language.rateBounds.lowerBound), language.rateBounds.upperBound)
+                acceptedSampleCount += 1
             }
         }
 

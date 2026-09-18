@@ -392,5 +392,45 @@ func runPacingSuite() -> (pass: Int, fail: Int) {
     report.check(latin.rate == 16.0, "Latin starts at 16 chars/sec (~190 wpm)",
                  detail: "\(latin.rate)")
 
+    report.section("take 结束导出语速样本")
+
+    let exporting = ReadingPacer(language: .cjk)
+    exporting.reset(to: 0, language: .cjk)
+    // correct() 只在 confidence >= minimumRateConfidence 且时间前进时采样，
+    // 所以喂够高置信度的推进才会累积样本。
+    for i in 1...12 {
+        exporting.correct(to: Double(i) * 5.0, confidence: 0.9,
+                          at: TimeInterval(i), seekThreshold: 40)
+    }
+    let sample = exporting.exportSample()
+    report.check(sample != nil, "样本够了就能导出")
+    report.check(sample?.language == .cjk, "带语种——中英文字符/秒差三倍以上")
+    report.check((sample?.charsPerSecond ?? 0) > 0, "语速为正", detail: "\(sample?.charsPerSecond ?? -1)")
+
+    let tooFew = ReadingPacer(language: .cjk)
+    tooFew.reset(to: 0, language: .cjk)
+    tooFew.correct(to: 5.0, confidence: 0.9, at: 1, seekThreshold: 40)
+    report.check(tooFew.exportSample() == nil,
+                 "样本不足时返回 nil——一个不可信的数混进中位数，比少一个样本更糟")
+
+    let lowConfidence = ReadingPacer(language: .cjk)
+    lowConfidence.reset(to: 0, language: .cjk)
+    for i in 1...12 {
+        lowConfidence.correct(to: Double(i) * 5.0, confidence: 0.2,
+                              at: TimeInterval(i), seekThreshold: 40)
+    }
+    report.check(lowConfidence.exportSample() == nil,
+                 "低置信度的推进不计入样本")
+
+    let afterReset = ReadingPacer(language: .cjk)
+    afterReset.reset(to: 0, language: .cjk)
+    for i in 1...12 {
+        afterReset.correct(to: Double(i) * 5.0, confidence: 0.9,
+                           at: TimeInterval(i), seekThreshold: 40)
+    }
+    afterReset.reset(to: 0, language: .cjk)
+    report.check(afterReset.exportSample() == nil,
+                 "reset 后重新积累——不能把上一条稿的语速算到这一条头上")
+
     return (report.pass, report.fail)
 }
