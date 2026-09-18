@@ -633,8 +633,9 @@ function fact(id: string, sourceId: string, text: string): Fact {
   return { id, sourceId, text, quote: text };
 }
 
-test("numeric signature pulls out every number, sorted", () => {
-  expect(numericSignature("降准 0.5 个百分点，释放 1 万亿元，3 月 15 日生效")).toEqual(["0.5", "1", "15", "3"]);
+test("the signature carries each number together with its unit, sorted", () => {
+  expect(numericSignature("降准 0.5 个百分点，释放 1 万亿元，3 月 15 日生效"))
+    .toEqual(["0.5个百", "15日生", "1万亿", "3月"]);
 });
 
 test("numeric signature is empty when there are no numbers", () => {
@@ -659,6 +660,16 @@ test("same wording but a different number does NOT merge", () => {
   expect(mergeFacts(facts)).toHaveLength(2);
 });
 
+test("same figure in a different currency does NOT merge", () => {
+  // 只取裸数字时两边签名都是 ["23"]，文本相似度 0.64 远超门槛，会被并成一条，
+  // 其中一种币种在到达 ⑤ 的冲突检测之前就没了。单位进签名就是为了挡住这个。
+  const facts = [
+    fact("f0", "s0", "涉及金额约 23 亿美元"),
+    fact("f1", "s1", "涉及金额约 23 亿欧元"),
+  ];
+  expect(mergeFacts(facts)).toHaveLength(2);
+});
+
 test("unrelated facts stay apart", () => {
   const facts = [
     fact("f0", "s0", "此次降准释放长期资金约 1 万亿元"),
@@ -679,6 +690,38 @@ test("number-free facts need a higher bar to merge", () => {
     fact("f3", "s1", "分析师对后续政策走向看法不一"),
   ];
   expect(mergeFacts(looser)).toHaveLength(2);
+});
+
+test("MERGE_JACCARD is inclusive at exactly 0.45", () => {
+  // 两串末尾带同一个「1」，所以数字签名相同，走的是 0.45 这条门槛。
+  // "abcdefghij1" → 10 个 2-gram；"abcdefghijklmnopqrs1" → 19 个；共享 9，
+  // 并集 20 —— jaccard 恰好 0.45。`>=` 归并、`>` 不归并，也抓「两个常量互换」。
+  expect(mergeFacts([
+    fact("f0", "s0", "abcdefghij 1"),
+    fact("f1", "s1", "abcdefghijklmnopqrs 1"),
+  ])).toHaveLength(1);
+
+  // "abc1" / "abcd1" 的 jaccard 是 0.4，低于门槛，不该归并——挡住阈值被调低
+  expect(mergeFacts([
+    fact("f2", "s0", "abc 1"),
+    fact("f3", "s1", "abcd 1"),
+  ])).toHaveLength(2);
+});
+
+test("MERGE_JACCARD_NO_NUMBERS is inclusive at exactly 0.7", () => {
+  // 两串都没有数字，走的是 0.7 这条门槛。
+  // "abcdefgh" → 7 个 2-gram；"abcdefghijk" → 10 个；共享 7，并集 10 —— 恰好 0.7。
+  expect(mergeFacts([
+    fact("f0", "s0", "abcdefgh"),
+    fact("f1", "s1", "abcdefghijk"),
+  ])).toHaveLength(1);
+
+  // "abc" / "abcd" 的 jaccard 是 0.667：低于 0.7 不该归并，
+  // 但它高于 0.45 —— 所以两个常量被互换的话这一条会失败。
+  expect(mergeFacts([
+    fact("f2", "s0", "abc"),
+    fact("f3", "s1", "abcd"),
+  ])).toHaveLength(2);
 });
 
 test("a merged claim keeps the longest wording", () => {
@@ -711,14 +754,28 @@ export const MERGE_JACCARD = 0.45;
 /** 两边都没有数字时，门槛抬高——没有数字可对，只能更信文本。 */
 export const MERGE_JACCARD_NO_NUMBERS = 0.7;
 
+/** 数字，加上紧跟的最多两个非数字非空白字符。 */
+const NUMBER_WITH_UNIT = /(\d+(?:\.\d+)?)\s*([^\d\s]{0,2})/gu;
+
 /**
- * 一句话里的全部数字，排序后作为签名。
- * 数字是口播稿里最容易翻车的东西：**数字不一致，绝不归并**。
- * 单位暂不解析（「23 亿美元」只取 23）——单位差异留给下一个计划的语义冲突检测。
+ * 一句话里的全部「数字 + 单位」，排序后作为签名。
+ * 数字是口播稿里最容易翻车的东西：**签名不一致，绝不归并**。
+ *
+ * 为什么单位必须一起吃进来：只取裸数字时，「涉及金额约 23 亿美元」和
+ * 「涉及金额约 23 亿欧元」的签名都是 `["23"]`，而两句的 2-gram 相似度是
+ * 0.64，远超归并门槛——它们会被并成一条，其中一种币种**在到达 ⑤ 的冲突
+ * 检测之前就消失了**。数字不同本来指望 ⑤ 去判冲突，可这一类 gate 压根
+ * 不触发，所以补在这里，不能推给下一个计划。
+ *
+ * 只吃两个字符是刻意的：「亿美」「亿欧」已经足够区分，再多吃会把
+ * 「日起生效」这类行文差异也算进签名，让同一事实的两种措辞不归并。
+ * 少归并是安全方向（claim 显得信源更少、被标 weak），多归并不是。
+ *
+ * 仍然不做单位换算或归一化：「1.50」≠「1.5」、「5%」≠「5 个百分点」，
+ * 这些都是漏归并，朝安全方向。
  */
 export function numericSignature(text: string): string[] {
-  const found = text.match(/\d+(?:\.\d+)?/g) ?? [];
-  return [...found].sort();
+  return [...text.matchAll(NUMBER_WITH_UNIT)].map((m) => m[1]! + (m[2] ?? "")).sort();
 }
 
 function sameNumbers(a: string[], b: string[]): boolean {
@@ -783,7 +840,7 @@ export function mergeFacts(facts: Fact[]): MergedClaim[] {
 cd pipeline && npx vitest run test/merge.test.ts
 ```
 
-Expected: `7 passed`
+Expected: `10 passed`
 
 - [ ] **Step 5: 提交**
 
@@ -2272,7 +2329,214 @@ git commit -m "Make room for briefs, their evidence, and how fast people read"
 
 ---
 
-### Task 15: 收口
+### Task 15: 抽出共享的 union-find
+
+审查发现 `dedupe/` 下两个兄弟模块各写了一套 union-find：`independence.ts` 的
+`find` 带路径压缩，`merge.ts` 的不带。两者都正确，规模下性能也都无所谓——
+问题是同职责的代码在同一个目录里有两种写法，以后改一个忘了改另一个。
+
+**Files:**
+- Create: `pipeline/src/dedupe/union-find.ts`
+- Modify: `pipeline/src/dedupe/independence.ts`
+- Modify: `pipeline/src/dedupe/merge.ts`
+- Test: `pipeline/test/union-find.test.ts`
+
+- [ ] **Step 1: 写失败的测试**
+
+`pipeline/test/union-find.test.ts`：
+
+```ts
+import { expect, test } from "vitest";
+import { createUnionFind } from "../src/dedupe/union-find.js";
+
+test("everything starts in its own group", () => {
+  expect(createUnionFind(3).groups()).toEqual([[0], [1], [2]]);
+});
+
+test("union merges two groups", () => {
+  const uf = createUnionFind(3);
+  uf.union(0, 2);
+  expect(uf.groups()).toEqual([[0, 2], [1]]);
+});
+
+test("grouping is transitive", () => {
+  const uf = createUnionFind(4);
+  uf.union(0, 1);
+  uf.union(1, 2);
+  expect(uf.groups()).toEqual([[0, 1, 2], [3]]);
+});
+
+test("union is idempotent", () => {
+  const uf = createUnionFind(2);
+  uf.union(0, 1);
+  uf.union(0, 1);
+  uf.union(1, 0);
+  expect(uf.groups()).toEqual([[0, 1]]);
+});
+
+test("a long chain still resolves, whichever order it was built in", () => {
+  const uf = createUnionFind(64);
+  for (let i = 63; i > 0; i--) uf.union(i - 1, i);
+  const groups = uf.groups();
+  expect(groups).toHaveLength(1);
+  expect(groups[0]).toHaveLength(64);
+});
+
+test("groups come back in order of first member", () => {
+  const uf = createUnionFind(5);
+  uf.union(3, 1);
+  expect(uf.groups()).toEqual([[0], [1, 3], [2], [4]]);
+});
+
+test("size zero has no groups", () => {
+  expect(createUnionFind(0).groups()).toEqual([]);
+});
+```
+
+- [ ] **Step 2: 跑测试确认它失败**
+
+```bash
+cd pipeline && npx vitest run test/union-find.test.ts
+```
+
+Expected: FAIL，报 `Failed to resolve import "../src/dedupe/union-find.js"`
+
+- [ ] **Step 3: 实现**
+
+`pipeline/src/dedupe/union-find.ts`：
+
+```ts
+/**
+ * 按下标分组的并查集。`dedupe/` 下两处都要用：
+ * `independence.ts` 把转载并成一个信源，`merge.ts` 把重复的事实并成一条 claim。
+ *
+ * `groups()` 按**每组最小成员**的顺序返回，组内也升序——两个调用方都要
+ * 稳定的输出顺序（`merge.ts` 用它给 claim 编号），所以顺序是接口的一部分，
+ * 不是实现细节。
+ */
+export interface UnionFind {
+  union(a: number, b: number): void;
+  groups(): number[][];
+}
+
+export function createUnionFind(size: number): UnionFind {
+  const parent = Array.from({ length: size }, (_, i) => i);
+
+  const find = (i: number): number => {
+    let root = i;
+    while (parent[root] !== root) root = parent[root]!;
+    // 路径压缩：把这一路上的节点直接挂到根上
+    let walk = i;
+    while (parent[walk] !== root) {
+      const next = parent[walk]!;
+      parent[walk] = root;
+      walk = next;
+    }
+    return root;
+  };
+
+  return {
+    union(a, b) {
+      const ra = find(a);
+      const rb = find(b);
+      if (ra !== rb) parent[rb] = ra;
+    },
+    groups() {
+      const byRoot = new Map<number, number[]>();
+      for (let i = 0; i < size; i++) {
+        const root = find(i);
+        const bucket = byRoot.get(root);
+        if (bucket) bucket.push(i);
+        else byRoot.set(root, [i]);
+      }
+      return [...byRoot.values()];
+    },
+  };
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+cd pipeline && npx vitest run test/union-find.test.ts
+```
+
+Expected: `7 passed`
+
+- [ ] **Step 5: 让 independence.ts 用它**
+
+在 `pipeline/src/dedupe/independence.ts` 里，把 import 改成：
+
+```ts
+import type { Source, SourceId } from "../domain/types.js";
+import { BODY_SHINGLE_K, jaccard, shingles } from "./shingle.js";
+import { createUnionFind } from "./union-find.js";
+```
+
+删掉 `groupSources` 里从 `const parent = sources.map(...)` 到 `const union = ...};` 的整段本地并查集，换成一行：
+
+```ts
+  const uf = createUnionFind(sources.length);
+```
+
+把两处 `union(i, j)` 改成 `uf.union(i, j)`，并把函数结尾从 `const byRoot = new Map...` 那整段换成：
+
+```ts
+  return uf.groups().map((members) => ({
+    sourceIds: members.map((i) => sources[i]!.id),
+  }));
+```
+
+- [ ] **Step 6: 让 merge.ts 用它**
+
+在 `pipeline/src/dedupe/merge.ts` 里，import 加一行：
+
+```ts
+import { createUnionFind } from "./union-find.js";
+```
+
+删掉 `mergeFacts` 里的本地 `parent` / `find` / `union`，换成：
+
+```ts
+  const uf = createUnionFind(facts.length);
+```
+
+把 `union(i, j)` 改成 `uf.union(i, j)`，并把结尾的 `const byRoot = ...` 整段换成：
+
+```ts
+  return uf.groups().map((indices, n) => {
+    // 最长的措辞信息量最大，用它当 Claim 的表述
+    const longest = indices.reduce((best, i) =>
+      facts[i]!.text.length > facts[best]!.text.length ? i : best, indices[0]!);
+    return {
+      id: `c${n}`,
+      text: facts[longest]!.text,
+      factIds: indices.map((i) => facts[i]!.id),
+    } satisfies MergedClaim;
+  });
+```
+
+- [ ] **Step 7: 全量测试——这一步是重点**
+
+```bash
+cd pipeline && npm test && npm run typecheck
+```
+
+Expected: 现有的每一个测试都照旧通过，只是多了 union-find 自己的 7 个。
+**一个都不许改。** 这是纯重构：任何既有测试变红都说明抽取改变了行为，
+报告出来，不要去动测试。
+
+- [ ] **Step 8: 提交**
+
+```bash
+git add pipeline/src/dedupe/union-find.ts pipeline/test/union-find.test.ts \
+        pipeline/src/dedupe/independence.ts pipeline/src/dedupe/merge.ts
+git commit -m "Give the two groupers one union-find instead of two"
+```
+
+---
+
+### Task 16: 收口
 
 **Files:**
 - Create: `pipeline/README.md`
@@ -2366,6 +2630,9 @@ git commit -m "Say what the pipeline does and does not do yet"
 7. **独立源规则集的两个盲区**（§5 的规则现在漏这两类，都朝算多的方向）：
    轻改+只摘引一段的转载逃过整篇 Jaccard；两家都引一个不在信源集合里的通讯社时
    `creditedTo` 不相等匹配。前者要段落级相似度，后者要决定「同 creditedTo 是否即归并」
-8. **落库时的文本口径**：本包只产出**句子文本**，从不拼接整篇——spec §9.2 ④ 警告过
+8. **claim id 是位置函数**：`c${n}` 由 fact 到达顺序决定。当前是「一次跑到底」，
+   同一次运行内稳定就够用。真要支持「人工改完事实列表再从 ④ 增量重跑」，
+   得换成内容 hash 或最小 factId
+9. **落库时的文本口径**：本包只产出**句子文本**，从不拼接整篇——spec §9.2 ④ 警告过
    两边各拼一次会让提词器的字偏移永久性偏移且随脚本长度累积。排版口径由
    `PromptScriptText` 唯一持有。下一个计划写库时必须守住这条
