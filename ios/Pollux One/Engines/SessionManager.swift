@@ -77,7 +77,7 @@ final class SessionManager {
         await takeArchiver.refreshPermission()
     }
 
-    func startTake() {
+    func startTake() async {
         // 没有 guard：相机是根视图，没有稿也要能按下快门。跟稿有关的五件事
         // ——阅读位置、对齐、提词、Safe Word、按稿件文本挑语音识别的语种——
         // 无稿时本来就无从谈起，所以是有稿才做，而不是整个动作不做。
@@ -127,7 +127,7 @@ final class SessionManager {
         teleprompterEngine.startPacing()
 
         do {
-            try speechService.start(
+            try await speechService.start(
                 locale: SpeechRecognitionService.locale(forScriptText: revision.script.fullText)
             )
             speechError = nil

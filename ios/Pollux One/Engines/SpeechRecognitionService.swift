@@ -44,7 +44,7 @@ final class SpeechRecognitionService: NSObject {
         return Locale(identifier: isCJK ? "zh-CN" : "en-US")
     }
 
-    func start(locale: Locale = Locale(identifier: "en-US")) throws {
+    func start(locale: Locale = Locale(identifier: "en-US")) async throws {
         guard !isRunning else { return }
         let recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer()
         guard let recognizer, recognizer.isAvailable else {
@@ -55,7 +55,7 @@ final class SpeechRecognitionService: NSObject {
         // Must come before touching audioEngine.inputNode: without an active
         // session the engine refuses to start and no audio ever arrives.
         do {
-            try AudioSessionController.activateForRecording()
+            try await AudioSessionController.activateForRecording()
         } catch {
             throw SpeechRecognitionError.audioSessionFailed(error)
         }

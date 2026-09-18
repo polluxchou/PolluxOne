@@ -79,7 +79,7 @@ final class CameraEngine: NSObject {
         // audio session is configured here, when the camera comes up, not when
         // recording starts.
         do {
-            try AudioSessionController.activateForRecording()
+            try await AudioSessionController.activateForRecording()
         } catch {
             lastError = "Audio unavailable, recording would be silent: \(error.localizedDescription)"
         }
