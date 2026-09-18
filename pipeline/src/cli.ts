@@ -6,7 +6,7 @@ import { findNumericConflicts } from "./dedupe/conflict.js";
 import { DEFAULT_CHARS_PER_SECOND } from "./domain/prosody.js";
 import { DeepSeekClient } from "./models/deepseek.js";
 import { TokenLedger } from "./models/ledger.js";
-import { SearchClient } from "./models/search.js";
+import { ZhipuSearchClient } from "./models/zhipu-search.js";
 import { readArticle } from "./net/jina.js";
 import { runPipeline, type Ports, type RunOptions } from "./run.js";
 import {
@@ -121,7 +121,7 @@ const ENV_PATH = fileURLToPath(new URL("../.env.local", import.meta.url));
  */
 export function livePorts(config: Config, ledger: TokenLedger): Ports {
   const deepseek = new DeepSeekClient(config.deepseek, ledger);
-  const search = new SearchClient(config.anthropic.apiKey, ledger);
+  const search = new ZhipuSearchClient(config.zhipu.apiKey, ledger);
 
   const draftOnce = async (prompt: string, allowed: Set<string>) =>
     validateDraft(

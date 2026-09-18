@@ -30,26 +30,26 @@ describe("resolveConfig", () => {
     const cfg = resolveConfig({
       DEEPSEEK_API_KEY: "sk-x",
       DEEPSEEK_BASE_URL: "https://api.deepseek.com",
-      ANTHROPIC_API_KEY: "sk-ant-y",
+      ZHIPU_API_KEY: "zp-y",
     });
     expect(cfg.deepseek.apiKey).toBe("sk-x");
-    expect(cfg.anthropic.apiKey).toBe("sk-ant-y");
+    expect(cfg.zhipu.apiKey).toBe("zp-y");
   });
 
   it("baseUrl 缺省有默认值", () => {
-    const cfg = resolveConfig({ DEEPSEEK_API_KEY: "sk-x", ANTHROPIC_API_KEY: "sk-ant-y" });
+    const cfg = resolveConfig({ DEEPSEEK_API_KEY: "sk-x", ZHIPU_API_KEY: "zp-y" });
     expect(cfg.deepseek.baseUrl).toBe("https://api.deepseek.com");
   });
 
   it("缺 key 时抛，且说清缺哪个", () => {
     expect(() => resolveConfig({ DEEPSEEK_API_KEY: "sk-x" })).toThrow(
-      /ANTHROPIC_API_KEY/,
+      /ZHIPU_API_KEY/,
     );
   });
 
   it("空字符串等同于缺失——填了等号但没填值是最常见的错", () => {
     expect(() =>
-      resolveConfig({ DEEPSEEK_API_KEY: "sk-x", ANTHROPIC_API_KEY: "   " }),
-    ).toThrow(/ANTHROPIC_API_KEY/);
+      resolveConfig({ DEEPSEEK_API_KEY: "sk-x", ZHIPU_API_KEY: "   " }),
+    ).toThrow(/ZHIPU_API_KEY/);
   });
 });

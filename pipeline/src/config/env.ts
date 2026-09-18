@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 export interface Config {
   deepseek: { apiKey: string; baseUrl: string };
-  anthropic: { apiKey: string };
+  zhipu: { apiKey: string };
 }
 
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
@@ -40,7 +40,7 @@ export function resolveConfig(env: Record<string, string | undefined>): Config {
   };
 
   const deepseekKey = need("DEEPSEEK_API_KEY");
-  const anthropicKey = need("ANTHROPIC_API_KEY");
+  const zhipuKey = need("ZHIPU_API_KEY");
 
   if (missing.length > 0) {
     throw new Error(
@@ -54,7 +54,7 @@ export function resolveConfig(env: Record<string, string | undefined>): Config {
       apiKey: deepseekKey,
       baseUrl: (env.DEEPSEEK_BASE_URL ?? "").trim() || DEFAULT_DEEPSEEK_BASE_URL,
     },
-    anthropic: { apiKey: anthropicKey },
+    zhipu: { apiKey: zhipuKey },
   };
 }
 
