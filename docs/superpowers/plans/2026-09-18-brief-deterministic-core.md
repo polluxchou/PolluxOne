@@ -2290,19 +2290,48 @@ git commit -m "Run the deterministic stages end to end"
 
 ```ts
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vitest";
+import { main } from "../src/cli.js";
 
-function run(fixture: string): { code: number; out: string } {
+const FIXTURE = "test/fixtures/reserve-cut.json";
+
+/**
+ * 直接调 main 并截获输出。原来每条测试都 spawn 一个 `npx tsx` 子进程，
+ * 一次约 330ms，而且把真实异常和 stderr 都吃掉了——失败原因是「fixture 坏了」
+ * 还是「npx 不在」看起来一模一样。
+ *
+ * 另：fixture 的 draft 里写死了 c0/c1/c2。这些 id 是 `mergeFacts` 按 fact
+ * 出现顺序发的**位置句柄**，不是稳定键——调换 facts 数组的顺序，draft 会
+ * 悄悄指向另外几条 claim，而这里没有任何测试会发现。
+ */
+function run(...args: string[]): { code: number; out: string; err: string } {
+  const out: string[] = [];
+  const err: string[] = [];
+  const realOut = process.stdout.write.bind(process.stdout);
+  const realErr = process.stderr.write.bind(process.stderr);
+  process.stdout.write = ((c: unknown) => { out.push(String(c)); return true; }) as typeof process.stdout.write;
+  process.stderr.write = ((c: unknown) => { err.push(String(c)); return true; }) as typeof process.stderr.write;
   try {
-    return { code: 0, out: execFileSync("npx", ["tsx", "src/cli.ts", fixture], { encoding: "utf8" }) };
-  } catch (error) {
-    const e = error as { status: number; stdout: string };
-    return { code: e.status, out: e.stdout };
+    return { code: main(["node", "cli", ...args]), out: out.join(""), err: err.join("") };
+  } finally {
+    process.stdout.write = realOut;
+    process.stderr.write = realErr;
   }
 }
 
+/** 拿真 fixture 改坏一个字段，写到临时文件。 */
+function malformed(patch: Record<string, unknown>): string {
+  const base = JSON.parse(readFileSync(FIXTURE, "utf8")) as Record<string, unknown>;
+  const path = join(mkdtempSync(join(tmpdir(), "pollux-cli-")), "bad.json");
+  writeFileSync(path, JSON.stringify({ ...base, ...patch }));
+  return path;
+}
+
 test("the reserve-cut fixture produces a script and exits zero", () => {
-  const { code, out } = run("test/fixtures/reserve-cut.json");
+  const { code, out } = run(FIXTURE);
   expect(code).toBe(0);
 
   const result = JSON.parse(out);
@@ -2310,26 +2339,47 @@ test("the reserve-cut fixture produces a script and exits zero", () => {
   expect(result.bind.ok).toBe(true);
 });
 
-test("the twelve-repost source set is counted honestly", () => {
-  const { out } = run("test/fixtures/reserve-cut.json");
-  const result = JSON.parse(out);
+test("the repost does not get counted as an independent source", () => {
+  const result = JSON.parse(run(FIXTURE).out);
   const trillion = result.claims.find((c: { text: string }) => c.text.includes("1 万亿"));
   expect(trillion.independence).toBe(3);
   expect(trillion.confidence).toBe("strong");
 });
 
 test("the Reuters/Bloomberg figures come out conflicted and stay out of the script", () => {
-  const { out } = run("test/fixtures/reserve-cut.json");
-  const result = JSON.parse(out);
+  const result = JSON.parse(run(FIXTURE).out);
   expect(result.selection.conflicted).toHaveLength(2);
   for (const id of result.selection.conflicted) {
     expect(result.selection.picked).not.toContain(id);
   }
 });
 
-test("a missing fixture path exits non-zero", () => {
-  const { code } = run("test/fixtures/does-not-exist.json");
-  expect(code).not.toBe(0);
+test("a missing fixture path exits two", () => {
+  // 原来是 not.toBe(0)，那样连「npx 自己没装」都算通过。
+  expect(run("test/fixtures/does-not-exist.json").code).toBe(2);
+});
+
+test("a duration that is not a number is refused, not quietly treated as 30 seconds", () => {
+  // snapDuration 用 `<` 比较，NaN < NaN 恒假，reduce 从不更新，
+  // 于是静默落回第一档 30 秒——实测过，一个看起来很合理的错答案。
+  const { code, err } = run(malformed({ durationSec: "六十" }));
+  expect(code).toBe(2);
+  expect(err).toMatch(/durationSec/);
+});
+
+test("a fact citing a source that is not in the file is refused", () => {
+  const base = JSON.parse(readFileSync(FIXTURE, "utf8")) as { facts: Record<string, unknown>[] };
+  const facts = base.facts.map((f, i) => (i === 0 ? { ...f, sourceId: "s99" } : f));
+  const { code, err } = run(malformed({ facts }));
+  expect(code).toBe(2);
+  expect(err).toMatch(/s99/);
+});
+
+test("npm run brief really works end to end", () => {
+  // 只保留这一条子进程测试：它验的是 `tsx src/cli.ts <path>` 这条真实调用
+  // 能跑通，直接调 main 验不到。一条就够，不需要四条都付这个代价。
+  const out = execFileSync("npx", ["tsx", "src/cli.ts", FIXTURE], { encoding: "utf8" });
+  expect(JSON.parse(out).selection.verdict).toBe("ok");
 });
 ```
 
@@ -2346,8 +2396,45 @@ Expected: FAIL —— `src/cli.ts` 不存在，四条全部失败
 `pipeline/src/cli.ts`：
 
 ```ts
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { buildBrief, type CoreInput } from "./core.js";
+
+/**
+ * 从磁盘读进来的东西只是**形状像** CoreInput，`as` 一个检查都不做。
+ * 这三类畸形输入的后果都不是「报错」：
+ *
+ * - 缺 `facts` → 在 `mergeFacts` 里抛一个看不懂的 TypeError
+ * - `durationSec` 写成非数字字符串 → `snapDuration` 每次比较都是 NaN，
+ *   `NaN < NaN` 恒假，reduce 从不更新，**静默返回 30 秒**——一个看起来
+ *   很合理的错答案（实测过）
+ * - fact 指向不存在的 source → 悄悄少算独立源，没有任何提示
+ *
+ * 这个文件是磁盘和类型化代码之间的信任边界，检查就该在这里，不必引校验库。
+ */
+function validate(raw: unknown, path: string): CoreInput {
+  const bad = (why: string): never => {
+    throw new Error(`${path}: ${why}`);
+  };
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) bad("expected a JSON object");
+  const o = raw as Record<string, unknown>;
+
+  for (const key of ["durationSec", "register", "charsPerSecond"] as const) {
+    if (typeof o[key] !== "number" || !Number.isFinite(o[key])) {
+      bad(`${key} must be a finite number, got ${JSON.stringify(o[key])}`);
+    }
+  }
+  for (const key of ["sources", "facts", "draft"] as const) {
+    if (!Array.isArray(o[key])) bad(`${key} must be an array, got ${JSON.stringify(o[key])}`);
+  }
+
+  const input = o as unknown as CoreInput;
+  const known = new Set(input.sources.map((s) => s.id));
+  for (const fact of input.facts) {
+    if (!known.has(fact.sourceId)) bad(`fact ${fact.id} cites unknown source ${fact.sourceId}`);
+  }
+  return input;
+}
 
 /**
  * 把一份固定数据跑过确定性内核，结果打到 stdout。
@@ -2356,8 +2443,10 @@ import { buildBrief, type CoreInput } from "./core.js";
  *
  * 模型与网络层接进来之后，这个入口仍然有用：它是唯一能**不花一分钱**
  * 反复验证 ④⑤⑥⑧⑨ 的地方。
+ *
+ * 退出码：0 正常 · 1 出稿了但绑定失败 · 2 输入读不了或管线抛了错。
  */
-function main(argv: string[]): number {
+export function main(argv: string[]): number {
   const path = argv[2];
   if (path === undefined) {
     process.stderr.write("usage: brief <fixture.json>\n");
@@ -2366,13 +2455,22 @@ function main(argv: string[]): number {
 
   let input: CoreInput;
   try {
-    input = JSON.parse(readFileSync(path, "utf8")) as CoreInput;
+    input = validate(JSON.parse(readFileSync(path, "utf8")), path);
   } catch (error) {
-    process.stderr.write(`cannot read ${path}: ${(error as Error).message}\n`);
+    process.stderr.write(`${(error as Error).message}\n`);
     return 2;
   }
 
-  const result = buildBrief(input);
+  let result;
+  try {
+    result = buildBrief(input);
+  } catch (error) {
+    // 管线自己抛错也走 2，不能让异常逃出去：未捕获异常的默认退出码**也是 1**，
+    // 会和下面「出稿了但绑定失败」撞车，CI 就分不清是数据坏了还是绑定坏了。
+    process.stderr.write(`${path}: pipeline failed: ${(error as Error).message}\n`);
+    return 2;
+  }
+
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 
   // 出稿了但绑定有问题，是最该被 CI 拦住的情况
@@ -2380,7 +2478,13 @@ function main(argv: string[]): number {
   return 0;
 }
 
-process.exit(main(process.argv));
+// 只有被当作脚本直接跑时才退出进程；被 import（测试）时什么都不做。
+// realpathSync 是必须的：macOS 上 /tmp 是 /private/tmp 的符号链接，
+// 不解开的话 argv[1] 和 import.meta.url 对不上，守卫会恒假。
+const entry = process.argv[1];
+if (entry !== undefined && import.meta.url === pathToFileURL(realpathSync(entry)).href) {
+  process.exit(main(process.argv));
+}
 ```
 
 - [ ] **Step 5: 跑测试确认通过**
@@ -2389,7 +2493,7 @@ process.exit(main(process.argv));
 cd pipeline && npx vitest run test/cli.test.ts
 ```
 
-Expected: `4 passed`
+Expected: `7 passed`
 
 - [ ] **Step 6: 手动看一眼输出**
 
