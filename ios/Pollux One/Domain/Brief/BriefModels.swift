@@ -54,3 +54,39 @@ struct Brief: Codable, Equatable, Identifiable {
     /// ⑥ 不建议播时的理由，其余状态为 nil。
     let insufficientReason: String?
 }
+
+/// 「换一篇」的一行。Brief 在跑的时候还不是 Script，所以列表是两者的合并流。
+struct ScriptListRow: Equatable, Identifiable {
+    let id: String
+    let title: String
+    let subtitle: String
+    let isResearching: Bool
+}
+
+enum ScriptListRows {
+    static func build(scriptTitles: [(id: String, title: String, seconds: Int)],
+                      briefs: [Brief]) -> [ScriptListRow] {
+        let briefRows = briefs.map { brief in
+            ScriptListRow(
+                id: brief.id,
+                title: brief.news.title,
+                subtitle: brief.status == .researching ? "调研中" : "\(brief.estimatedSeconds) 秒",
+                isResearching: brief.status == .researching
+            )
+        }
+        let scriptRows = scriptTitles.map {
+            ScriptListRow(id: $0.id, title: $0.title, subtitle: "\($0.seconds) 秒",
+                          isResearching: false)
+        }
+        // 在跑的排最前：那是用户此刻最想看的东西。
+        return briefRows.filter(\.isResearching) + scriptRows
+            + briefRows.filter { !$0.isResearching }
+    }
+}
+
+/// 空状态。原文案 "Write a script on the Pollux One web console, then pull to
+/// refresh." 在 iOS 优先之后是错的——它把人支去了一个不再是主入口的地方。
+struct ScriptListEmptyState: Equatable {
+    let text = "还没有稿子。把一条新闻交给我，我去查。"
+    let action = BriefScreen.handOff
+}

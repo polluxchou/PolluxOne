@@ -326,5 +326,32 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     report.check(shortOfSources.actions.contains { $0.id == "another" }, "可以换一条")
     report.check(shortOfSources.costNote.contains("12"), "已消耗照实显示", detail: shortOfSources.costNote)
 
+    report.section("§8.2 返回语义")
+    report.check(BriefNavigation.back(from: .confirm) == .camera, "确认页退回相机")
+    report.check(BriefNavigation.back(from: .progress) == .camera, "等待页退回相机")
+    report.check(BriefNavigation.back(from: .review) == .camera, "审稿页退回相机")
+    report.check(!BriefNavigation.destroysTask(from: .progress),
+                 "离开不等于取消——任务继续在云上跑")
+    report.check(!BriefNavigation.canReturnToProgress(from: .review),
+                 "审稿页回不到等待页，调研已结束那一屏不复存在")
+    report.check(!BriefNavigation.canReturnToProgress(from: .insufficient),
+                 "不建议播同样回不去")
+
+    report.section("⑦ 换一篇")
+    var researching = brief
+    researching.status = .researching
+    let rows = ScriptListRows.build(
+        scriptTitles: [(id: "sc1", title: "旧稿", seconds: 60)],
+        briefs: [researching]
+    )
+    report.check(rows.count == 2, "在跑的 Brief 也要出现在列表里", detail: "\(rows.count)")
+    report.check(rows.first?.isResearching == true, "在跑的排最前")
+    report.check(rows.first?.subtitle == "调研中", "显示进度而不是秒数")
+
+    let empty = ScriptListEmptyState()
+    report.check(!empty.text.lowercased().contains("web console"),
+                 "空状态不再把人支去 web 端")
+    report.check(empty.action == .handOff, "空状态把人送去「交给我」")
+
     return (report.pass, report.fail)
 }
