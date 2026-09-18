@@ -30,6 +30,28 @@ test("an explicit credit line collapses a source into the one it credits", () =>
   expect(groupSources(sources)).toHaveLength(1);
 });
 
+test("rule 2 works whichever way round the credit line sits", () => {
+  // 上一条测试里被 credit 的一方排在前面，只命中了 `b.creditedTo === a.publisher`。
+  // 这一条把顺序倒过来，钉住另半个子句——不然把它删掉，七个测试照样全绿。
+  const sources = [
+    src("s0", "portal-a", "据新华社报道，央行今日决定实施降准，市场反应积极，多位分析师认为这一决定符合预期。", "xinhua"),
+    src("s1", "xinhua", WIRE),
+  ];
+  expect(groupSources(sources)).toHaveLength(1);
+});
+
+test("the fingerprint threshold is inclusive at exactly 0.5", () => {
+  // abcdefg → abcde bcdef cdefg；bcdefgh → bcdef cdefg defgh
+  // 共享 2 个，并集 3 + 3 − 2 = 4，jaccard 恰好 0.5。
+  // `>=` 归并、`>` 不归并——这是唯一能钉住那个运算符的测试。
+  const atThreshold = [src("s0", "portal-a", "abcdefg"), src("s1", "portal-b", "bcdefgh")];
+  expect(groupSources(atThreshold)).toHaveLength(1);
+
+  // abcdefg vs cdefghi 只共享 cdefg，jaccard 0.2，不该归并
+  const below = [src("s0", "portal-a", "abcdefg"), src("s1", "portal-b", "cdefghi")];
+  expect(groupSources(below)).toHaveLength(2);
+});
+
 test("same publisher is one source even when the two pieces differ", () => {
   const sources = [
     src("s0", "caixin", "央行降准零点五个百分点，为年内第二次，释放资金约一万亿元。"),

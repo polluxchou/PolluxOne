@@ -13,6 +13,15 @@ export interface SourceGroup {
  * **组数才是 independence，信源条数不是。** 同一份通讯社稿被五家门户转载，
  * 是 1 个源不是 5 个——这个数字算错，整个「每句可溯源」的承诺就是假的。
  *
+ * **已知盲区**——两处都朝「独立源算多了」这个危险方向，修法涉及产品判断而非
+ * 机械修复，记在下一个计划里：
+ *
+ * 1. 只逐字摘引 wire 稿一段、其余自己写的轻改转载，整篇 5-gram Jaccard 会远低于
+ *    0.5，三条规则全部漏掉，于是同一份通稿被当成两个独立源。要接住它得上段落级
+ *    或滑窗级相似度。
+ * 2. 两家门户都写「据新华社报道」、而新华社原稿不在本次信源集合里时，rule 2 不匹配
+ *    ——它比的是 `a.creditedTo === b.publisher`，不是两边 `creditedTo` 相等。
+ *
  * @param mediaGroups publisher → 媒体集团 key 的映射。同集团视为同一主体。
  */
 export function groupSources(
