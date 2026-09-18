@@ -336,10 +336,12 @@ briefs           id · user_id · input_kind · input_payload · angle
 brief_stages     id · brief_id · stage · status · started_at · ended_at · error · result
 brief_sources    id · brief_id · url · publisher · published_at · body · fingerprint
 brief_facts      id · brief_id · source_id · text · quote · extracted_at
-brief_claims     id · brief_id · text · independence · confidence
+brief_claims     id · brief_id · text · independence · merged_away_count · confidence
 claim_facts      claim_id · fact_id                         （多对多）
 claim_conflicts  claim_id · conflicts_with                  （谁和谁冲突）
 script_evidence  sentence_id · claim_id · sentence_fingerprint （⑧ 的产物）
+evidence_anchors id · sentence_id · claim_id · char_start · char_length
+                                                            （⑧ 的产物，一条 evidence 0..n 行）
 sentence_breaths sentence_id · kind · char_offset           （⑨ 的产物，一句多行）
 ```
 
@@ -362,6 +364,19 @@ sentence_breaths sentence_id · kind · char_offset           （⑨ 的产物�
   逗号都产出一个带位置的短气口、句末再产出一个长气口；做成每句单个枚举的话那一列
   永远只会是 `long`，而提词器真正用来配速的句内短气口全部无处可去。重读
   （emphasis）目前没有任何代码产出，等有了再单独建表。
+
+后补的两处（`0003_evidence_anchors.sql`），都是先做界面那一段从定稿的 mock 反推出来的：
+
+- **`evidence_anchors` 另建表，而不是给 `script_evidence` 加两列**。后者主键是
+  `(sentence_id, claim_id)`，一句话对同一条 claim 只能有一行；而锚点是 0..n 个——
+  一句话可能在两处提到同一个数字。加列会把这个上限固化成 1，而且锚点本来就可缺省
+  （区间越界或重叠时整句降级为纯文本），塞进主表会多出一对可空列。和 ⑤ 给气口
+  另建 `sentence_breaths` 是同一个判断。`char_start` / `char_length` 以
+  **Character** 计，不是 UTF-16 code unit——句中一有中文，用 UTF-16 会让后面每条
+  下划线整体错位，且越往后偏得越多。
+- **`brief_claims.merged_away_count` 与 `independence` 分开存**。两者相加
+  （3 + 6 = 9）正是 §5 开头「5 家门户转载不是 5 个源」要防的误读；合并成一个数
+  就只剩「3 个独立信源」，没法显示「另有 6 篇未计入」。
 
 Brief 产出的 Script 走现有表，不加字段。`script_evidence` 挂在旁边，
 提词器和录制侧完全不需要知道它存在。
