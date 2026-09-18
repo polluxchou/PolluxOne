@@ -15,8 +15,6 @@ struct ShutterRowView: View {
     ///
     /// **这是一行可逆的判断。** 将来要做「无稿也能拍」，把这个参数连同它的
     /// 调用点一起去掉即可；真正要改的是 `SessionManager`，让它在没有
-    /// scriptRevision 时也能起一条 take。那是产品功能，不在这个做界面的计划里。
-    let canRecord: Bool
     let onToggleRecording: () -> Void
     let onFlip: () -> Void
 
@@ -29,7 +27,7 @@ struct ShutterRowView: View {
 
             Spacer()
 
-            RecordButton(isRecording: isRecording, isEnabled: canRecord, action: onToggleRecording)
+            RecordButton(isRecording: isRecording, action: onToggleRecording)
 
             Spacer()
 
@@ -73,7 +71,6 @@ private struct FlipButton: View {
 
 private struct RecordButton: View {
     let isRecording: Bool
-    let isEnabled: Bool
     let action: () -> Void
 
     var body: some View {
@@ -83,15 +80,11 @@ private struct RecordButton: View {
                     .stroke(.white, lineWidth: 4)
                     .frame(width: 74, height: 74)
                 RoundedRectangle(cornerRadius: isRecording ? 7 : 33, style: .continuous)
-                    // 不可用时红色也退成灰：一个满红的快门是在邀请你按它。
-                    .fill(isEnabled ? HUDColor.recRed : Color.white)
+                    .fill(HUDColor.recRed)
                     .frame(width: isRecording ? 30 : 62, height: isRecording ? 30 : 62)
                     .animation(.easeInOut(duration: 0.2), value: isRecording)
             }
         }
         .buttonStyle(.plain)
-        .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.3)
-        .accessibilityHint(isEnabled ? "" : "先交一条新闻给我，或者换一篇稿")
     }
 }

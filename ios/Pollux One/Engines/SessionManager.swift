@@ -78,10 +78,12 @@ final class SessionManager {
     }
 
     func startTake() {
-        guard let revision = scriptRevision else { return }
+        // 没有 guard：相机是根视图，没有稿也要能按下快门。跟稿有关的五件事
+        // ——阅读位置、对齐、提词、Safe Word、按稿件文本挑语音识别的语种——
+        // 无稿时本来就无从谈起，所以是有稿才做，而不是整个动作不做。
         let recordingSession = RecordingSession(
             id: UUID(),
-            scriptRevisionId: revision.id,
+            scriptRevisionId: scriptRevision?.id,
             startedAt: Date(),
             endedAt: nil,
             cameraConfiguration: cameraEngine.configuration,
@@ -89,25 +91,39 @@ final class SessionManager {
             photoLibraryAssetIdentifier: nil
         )
         currentRecordingSession = recordingSession
-        readingSession = ReadingSession(
-            id: UUID(),
-            recordingSessionId: recordingSession.id,
-            currentPosition: ReadingPosition.start(for: revision.script),
-            progress: .zero,
-            isPaused: false
-        )
 
-        // Every take starts from the top of the script, so the engines that
-        // carry a position have to be rewound too. Resetting only
-        // readingSession left the alignment engine and the prompter showing
-        // wherever the previous take ended.
-        alignmentEngine.reset(script: revision.script, startingAt: nil)
-        teleprompterEngine.load(script: revision.script)
-        safeWordDetector.reset()
-        latestTranscriptText = ""
+        if let revision = scriptRevision {
+            readingSession = ReadingSession(
+                id: UUID(),
+                recordingSessionId: recordingSession.id,
+                currentPosition: ReadingPosition.start(for: revision.script),
+                progress: .zero,
+                isPaused: false
+            )
+
+            // Every take starts from the top of the script, so the engines that
+            // carry a position have to be rewound too. Resetting only
+            // readingSession left the alignment engine and the prompter showing
+            // wherever the previous take ended.
+            alignmentEngine.reset(script: revision.script, startingAt: nil)
+            teleprompterEngine.load(script: revision.script)
+            safeWordDetector.reset()
+            latestTranscriptText = ""
+        } else {
+            // 上一条稿的阅读进度不该挂在一条没有稿的 take 上。
+            readingSession = nil
+        }
 
         recordingEngine.startRecording()
         audioLevelMonitor.startDisplayUpdates()
+
+        guard let revision = scriptRevision else {
+            // 无稿：只录像和音量。没有词可跟，开语音识别只是白占麦克风，
+            // 还会让「识别失败」这种与用户无关的错误浮到 HUD 上。
+            speechError = nil
+            return
+        }
+
         teleprompterEngine.startPacing()
 
         do {

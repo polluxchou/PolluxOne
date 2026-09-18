@@ -295,9 +295,6 @@ struct RecordingView: View {
                 safeWord: "Pollux",
                 facing: viewModel.sessionManager.cameraEngine.configuration.facing,
                 canFlip: viewModel.canFlipCamera,
-                // 无稿时快门不可用。见 ShutterRowView.canRecord——那是一行
-                // 可逆的判断，撤掉它需要先让 SessionManager 支持无稿开拍。
-                canRecord: script != nil,
                 onToggleRecording: { viewModel.toggleRecording() },
                 onFlip: { viewModel.flipCamera() }
             )
