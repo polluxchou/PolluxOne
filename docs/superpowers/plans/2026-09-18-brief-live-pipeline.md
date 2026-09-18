@@ -2628,36 +2628,57 @@ EOF
 
 §9.2 ① 说得很直白：「按你的语速」这条差异化**目前没有数据支撑**。`ReadingPacer.rate` 是会话内状态，`reset()` 就没了。
 
+**核过的既有 API（别照 spec 写，spec 有出入）：** `ReadingPacer(language: ScriptLanguage)`，
+`private(set) var rate: Double`、`cursor`、`reset(to:language:)`、`advance(deltaTime:lookaheadCap:)`、
+`correct(to:confidence:at:seekThreshold:)`。`minimumRateConfidence` **已存在**并在 `correct` 里用着。
+**没有**样本计数——本任务要补一个，否则"样本够不够"无从判断。
+
+测试台的断言 API 是 `Report.check(_:_:detail:)`，不是 `expect`。
+
 - [ ] **Step 1: 在 harness 里写失败的测试**
 
 ```swift
-// 加进 ios/EngineHarness/PacingScenarios.swift
-scenario("take 结束能导出一个带置信度的语速样本") {
-    let pacer = ReadingPacer()
-    // 喂够样本，让 rate 稳定下来
-    for i in 0..<20 {
-        pacer.observe(characters: 5, at: TimeInterval(i) * 1.0)
+// 加进 ios/EngineHarness/PacingScenarios.swift 的 runPacingSuite()，return 之前
+
+    report.section("take 结束导出语速样本")
+
+    let exporting = ReadingPacer(language: .cjk)
+    exporting.reset(to: 0, language: .cjk)
+    // correct() 只在 confidence >= minimumRateConfidence 且时间前进时采样，
+    // 所以喂够高置信度的推进才会累积样本。
+    for i in 1...12 {
+        exporting.correct(to: Double(i) * 5.0, confidence: 0.9,
+                          at: TimeInterval(i), seekThreshold: 40)
     }
-    let sample = pacer.exportSample(language: .chinese)
-    expect(sample != nil, "样本不该是 nil")
-    expect(sample!.charsPerSecond > 0, "语速必须为正")
-    expect(sample!.confidence >= 0.5, "置信度应达到门槛")
-}
+    let sample = exporting.exportSample()
+    report.check(sample != nil, "样本够了就能导出")
+    report.check(sample?.language == .cjk, "带语种——中英文字符/秒差三倍以上")
+    report.check((sample?.charsPerSecond ?? 0) > 0, "语速为正", detail: "\(sample?.charsPerSecond ?? -1)")
 
-scenario("样本太少时不导出——低置信度的样本会毒化中位数") {
-    let pacer = ReadingPacer()
-    pacer.observe(characters: 5, at: 1.0)
-    expect(pacer.exportSample(language: .chinese) == nil,
-           "样本不足时必须返回 nil，而不是一个不可信的数")
-}
+    let tooFew = ReadingPacer(language: .cjk)
+    tooFew.reset(to: 0, language: .cjk)
+    tooFew.correct(to: 5.0, confidence: 0.9, at: 1, seekThreshold: 40)
+    report.check(tooFew.exportSample() == nil,
+                 "样本不足时返回 nil——一个不可信的数混进中位数，比少一个样本更糟")
 
-scenario("reset 之后不再导出上一段的语速") {
-    let pacer = ReadingPacer()
-    for i in 0..<20 { pacer.observe(characters: 5, at: TimeInterval(i)) }
-    pacer.reset()
-    expect(pacer.exportSample(language: .chinese) == nil,
-           "reset 后必须重新积累，不能把上一条稿的语速算到这一条头上")
-}
+    let lowConfidence = ReadingPacer(language: .cjk)
+    lowConfidence.reset(to: 0, language: .cjk)
+    for i in 1...12 {
+        lowConfidence.correct(to: Double(i) * 5.0, confidence: 0.2,
+                              at: TimeInterval(i), seekThreshold: 40)
+    }
+    report.check(lowConfidence.exportSample() == nil,
+                 "低置信度的推进不计入样本")
+
+    let afterReset = ReadingPacer(language: .cjk)
+    afterReset.reset(to: 0, language: .cjk)
+    for i in 1...12 {
+        afterReset.correct(to: Double(i) * 5.0, confidence: 0.9,
+                           at: TimeInterval(i), seekThreshold: 40)
+    }
+    afterReset.reset(to: 0, language: .cjk)
+    report.check(afterReset.exportSample() == nil,
+                 "reset 后重新积累——不能把上一条稿的语速算到这一条头上")
 ```
 
 - [ ] **Step 2: 跑一遍确认它失败**
@@ -2670,27 +2691,38 @@ Expected: FAIL — `exportSample` 不存在
 在 `ReadingPacer` 上加：
 
 ```swift
-/// 一次 take 结束时导出的语速样本。带语种，因为中英文的字符/秒差三倍以上。
-struct ReadingRateSample {
-    let language: ScriptLanguage
-    let charsPerSecond: Double
-    let confidence: Double
-}
+    /// 一次 take 结束时导出的语速样本。带语种，因为中英文的字符/秒差三倍以上。
+    struct Sample: Equatable {
+        let language: ScriptLanguage
+        let charsPerSecond: Double
+    }
 
-/// 低于这个置信度的 take 不计入——§9.2 ① 定的门槛。
-static let minimumRateConfidence = 0.5
+    /// 少于这个数不导出。样本太少时 rate 还基本是种子值，
+    /// 把它当成"这个用户的语速"存进去，等于用默认值污染中位数。
+    static let minimumSampleCount = 8
 
-/// 会话内状态导出成一个可以落库的样本。样本不足时返回 nil：
-/// 一个不可信的数混进中位数里，比少一个样本更糟。
-func exportSample(language: ScriptLanguage) -> ReadingRateSample? {
-    guard sampleCount >= Self.minimumSampleCount else { return nil }
-    let confidence = rateConfidence
-    guard confidence >= Self.minimumRateConfidence else { return nil }
-    return ReadingRateSample(language: language, charsPerSecond: rate, confidence: confidence)
-}
+    /// 实际被采纳的样本数——只有 correct() 里那个 `sample > 0` 分支走到才加。
+    private(set) var acceptedSampleCount = 0
+
+    /// 会话内状态导出成一个可以落库的样本。不够可信就返回 nil：
+    /// 一个不可信的数混进近 10 次的中位数里，比少一个样本更糟。
+    func exportSample() -> Sample? {
+        guard acceptedSampleCount >= Self.minimumSampleCount else { return nil }
+        return Sample(language: language, charsPerSecond: rate)
+    }
 ```
 
-在 `SessionManager` 结束 take 的路径上调用它，把样本交给 `BackendClient`（Task 15 补落库）。
+在 `correct(...)` 里那个 `if sample > 0 {` 块的末尾（`rate = min(max(...))` 之后）加一行：
+
+```swift
+                acceptedSampleCount += 1
+```
+
+在 `reset(to:language:)` 里加一行，让它跟着清零：
+
+```swift
+        acceptedSampleCount = 0
+```
 
 - [ ] **Step 4: 跑到绿**
 
