@@ -133,6 +133,25 @@
       ]
     }
   },
+  "recheckResults": {
+    "c3": {
+      "id": "c3",
+      "independence": 2,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "某券商研报",
+          "note": "「或再降10个基点」",
+          "time": "17:30"
+        },
+        {
+          "publisher": "路透中文",
+          "note": "独立测算，同样给到 10 个基点",
+          "time": "19:12"
+        }
+      ]
+    }
+  },
   "stages": [
     {
       "name": "抓取原文",

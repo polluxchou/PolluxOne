@@ -11,6 +11,16 @@ struct ReviewView: View {
     let onRecord: () -> Void
     let onSwitchScript: () -> Void
 
+    /// 哪几行正在重查 / 刚查完没找到。按句 id 存，因为重查是一行一行的，
+    /// 一次查 s4 不该让 s3 也转起来。
+    @State private var recheckPhases: [String: RecheckPhase] = [:]
+
+    /// 假装一次上游查询要用掉的时间。真管线接上之后这个数字会被真正的
+    /// 往返替掉，但那一行「重查中…」和它两头的状态不用重写。
+    private static let recheckDuration = Duration.milliseconds(1200)
+    /// 「没有找到新的信源」停留多久。够看清，又不至于赖在那里。
+    private static let foundNothingDuration = Duration.milliseconds(1800)
+
     private var counts: SentenceCounts { SentenceCounts(brief.sentences, claims: brief.claims) }
 
     var body: some View {
@@ -23,13 +33,48 @@ struct ReviewView: View {
                         SwipeableSentenceRow(
                             sentence: sentence,
                             claims: brief.claims,
+                            recheckPhase: recheckPhases[sentence.id] ?? .idle,
                             onDelete: { brief = brief.deletingSentence(sentence.id) },
-                            onRecheck: { /* 接管线后再实现 */ }
+                            onRecheck: { recheck(sentence.id) }
                         )
                     }
                 }
             }
             bottomBar
+        }
+    }
+
+    /// 重查一行。结果由 `Brief.recheckOutcome(forSentence:)` 定，这里只负责
+    /// 让它在时间上看得见：先转一会儿，再落到两个结果之一。
+    ///
+    /// 两条路径都必须在界面上留下痕迹。查到了就换证据、标签当场改口；
+    /// 没查到就明说「没有找到新的信源」——它和一个按下去什么也不发生的按钮
+    /// 在像素上一度是同一个样子，而那正是这个按钮之前的毛病。
+    private func recheck(_ sentenceId: String) {
+        guard recheckPhases[sentenceId] != .running else { return }  // 别叠着查
+        withAnimation(.easeInOut(duration: 0.18)) { recheckPhases[sentenceId] = .running }
+
+        Task {
+            try? await Task.sleep(for: Self.recheckDuration)
+            switch brief.recheckOutcome(forSentence: sentenceId) {
+            case .improved:
+                withAnimation(.snappy) {
+                    // 写回 @Binding：新的证据要留在 BriefFlow 手里，
+                    // 否则离开这一屏，刚查到的信源就没了。
+                    brief = brief.applyingRecheck(forSentence: sentenceId)
+                    recheckPhases[sentenceId] = .idle
+                }
+            case .unchanged:
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    recheckPhases[sentenceId] = .foundNothing
+                }
+                try? await Task.sleep(for: Self.foundNothingDuration)
+                withAnimation(.easeInOut(duration: 0.18)) { recheckPhases[sentenceId] = .idle }
+            case .notApplicable:
+                // 按钮根本没在这种句子上露出来（`SwipeActions(for:)`）。
+                // 真走到这里就安静收场，不要编一句「没找到」——它没查过。
+                recheckPhases[sentenceId] = .idle
+            }
         }
     }
 

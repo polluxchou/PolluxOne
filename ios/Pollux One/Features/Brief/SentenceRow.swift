@@ -10,9 +10,19 @@ extension SentenceAccent {
     }
 }
 
+/// 一行在重查上的瞬时状态。只活在界面里——查得到查不到由
+/// `Brief.recheckOutcome(forSentence:)` 说了算，这里只决定这一秒画什么。
+enum RecheckPhase: Equatable {
+    case idle
+    case running
+    /// 查完了，没有新的。要说出口——按下去毫无动静和「没找到」是两回事。
+    case foundNothing
+}
+
 struct SentenceRow: View {
     let sentence: BriefSentence
     let claims: [String: ClaimEvidence]
+    var recheckPhase: RecheckPhase = .idle
     @State private var isExpanded = false
 
     private var style: SentenceStyle { SentenceStyle(sentence: sentence, claims: claims) }
@@ -35,10 +45,35 @@ struct SentenceRow: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(.secondary)
                 }
+                recheckNote
             }
         }
         .padding(.vertical, 12)
         .padding(.horizontal, 24)
+    }
+
+    /// 重查的三种样子。`.idle` 时整行消失，不留一个空位置——
+    /// 没有在查的时候不该有任何关于查的字。
+    @ViewBuilder
+    private var recheckNote: some View {
+        switch recheckPhase {
+        case .idle:
+            EmptyView()
+        case .running:
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.mini)
+                Text("重查中…").font(.system(size: 11, design: .monospaced))
+            }
+            .foregroundStyle(.secondary)
+        case .foundNothing:
+            // 查过了，结果是空的。这句话必须说，否则用户只看到按钮弹回去，
+            // 分不清「查了没有」和「这个按钮坏了」。
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass").font(.system(size: 11, weight: .semibold))
+                Text("没有找到新的信源").font(.system(size: 11, design: .monospaced))
+            }
+            .foregroundStyle(.secondary)
+        }
     }
 
     private var accentBar: some View {
@@ -83,6 +118,7 @@ struct SentenceRow: View {
 struct SwipeableSentenceRow: View {
     let sentence: BriefSentence
     let claims: [String: ClaimEvidence]
+    let recheckPhase: RecheckPhase
     let onDelete: () -> Void
     let onRecheck: () -> Void
 
@@ -92,11 +128,13 @@ struct SwipeableSentenceRow: View {
     init(
         sentence: BriefSentence,
         claims: [String: ClaimEvidence],
+        recheckPhase: RecheckPhase = .idle,
         onDelete: @escaping () -> Void,
         onRecheck: @escaping () -> Void
     ) {
         self.sentence = sentence
         self.claims = claims
+        self.recheckPhase = recheckPhase
         self.onDelete = onDelete
         self.onRecheck = onRecheck
         let actions = SwipeActions(for: sentence.kind)
@@ -107,7 +145,7 @@ struct SwipeableSentenceRow: View {
     var body: some View {
         ZStack(alignment: .trailing) {
             buttons
-            SentenceRow(sentence: sentence, claims: claims)
+            SentenceRow(sentence: sentence, claims: claims, recheckPhase: recheckPhase)
                 .background(Color(.systemBackground))
                 .offset(x: swipe.offset)
                 .gesture(drag)

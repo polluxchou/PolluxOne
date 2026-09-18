@@ -353,5 +353,99 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
                  "空状态不再把人支去 web 端")
     report.check(empty.action == .handOff, "空状态把人送去「交给我」")
 
+    report.section("§8.1 重查")
+    // s4 挂的 c3 只有 1 个源，fixture 的 recheckResults 里有它 → 查得到新的。
+    let improvedOutcome = brief.recheckOutcome(forSentence: "s4")
+    report.check(improvedOutcome != .unchanged && improvedOutcome != .notApplicable,
+                 "弱信源那句重查得到新信源", detail: "\(improvedOutcome)")
+    if case .improved(let found) = improvedOutcome {
+        report.check(found.id == "c3", "换回来的是同一条 claim", detail: found.id)
+        report.check(found.independence == 2, "独立源从 1 变 2", detail: "\(found.independence)")
+        report.check(found.sources.count == found.independence,
+                     "列出的行数仍等于独立源数")
+    }
+
+    let afterRecheck = brief.applyingRecheck(forSentence: "s4")
+    report.check(afterRecheck.claims["c3"]?.independence == 2,
+                 "applyingRecheck 把新证据写了回去",
+                 detail: "\(afterRecheck.claims["c3"]?.independence ?? -1)")
+    report.check(afterRecheck.sentences == brief.sentences, "重查不动句子，只动证据")
+    report.check(afterRecheck.claims["c1"] == brief.claims["c1"], "没重查的 claim 原样不动")
+    report.check(EvidenceLabel(brief.claims["c3"]!).text == "仅 1 个信源",
+                 "重查之前标签是「仅 1 个信源」")
+    report.check(EvidenceLabel(afterRecheck.claims["c3"]!).text == "2 个独立信源",
+                 "重查之后标签改口，并且说的是独立信源")
+    report.check(!EvidenceLabel(afterRecheck.claims["c3"]!).isWarning,
+                 "不再是「仅」那个警告")
+    // 2 个源还不到 3，颜色留在黄——绿是 3 个独立源才配有的，
+    // 重查有收获不等于这句话已经站得住。
+    report.check(SentenceStyle(sentence: brief.sentences[3], claims: afterRecheck.claims).accent == .weak,
+                 "2 个源还没到 3，颜色仍是黄")
+
+    // s3 挂的 c1 不在 recheckResults 里 → 另一条路径：查了，没有新的。
+    report.check(brief.recheckOutcome(forSentence: "s3") == .unchanged,
+                 "recheckResults 里没有条目 = 没找到新信源")
+    report.check(brief.applyingRecheck(forSentence: "s3") == brief,
+                 "没找到新信源就原样返回，不假装动过")
+
+    // 观点句/钩子句没有事实点可查。SwipeActions 本来就不给它们露按钮，
+    // 但绕过按钮问到这里也只能是一个没反应。
+    report.check(brief.recheckOutcome(forSentence: "s5") == .notApplicable,
+                 "观点句没有可重查的事实点")
+    report.check(brief.recheckOutcome(forSentence: "s1") == .notApplicable,
+                 "钩子句同样没有")
+    report.check(brief.recheckOutcome(forSentence: "不存在的句子") == .notApplicable,
+                 "句子已经被删掉也不崩")
+    report.check(brief.applyingRecheck(forSentence: "s5") == brief,
+                 "无事实点时原样返回")
+
+    // 重查只能让信源变多。上游给回一个更小的 independence 是数据错误，
+    // 界面绝不能因此显示「重查之后信源反而变少了」。
+    if let downgraded = briefWithRecheckResult(brief,
+                                               claimId: "c3",
+                                               independence: 0,
+                                               sources: []) {
+        report.check(downgraded.recheckResults?["c3"]?.independence == 0,
+                     "构造出了一份「重查后变少」的坏数据")
+        report.check(downgraded.recheckOutcome(forSentence: "s4") == .unchanged,
+                     "重查只能让信源变多——更小的独立源数一律拒收")
+        report.check(downgraded.applyingRecheck(forSentence: "s4").claims["c3"]?.independence == 1,
+                     "被拒收之后 claim 保持原样，不会被改小",
+                     detail: "\(downgraded.applyingRecheck(forSentence: "s4").claims["c3"]?.independence ?? -1)")
+    } else {
+        report.check(false, "构造「重查后变少」的坏数据")
+    }
+    // 持平不是变少，仍然算查到了（同一条证据被再次确认）。
+    if let flat = briefWithRecheckResult(brief,
+                                         claimId: "c3",
+                                         independence: 1,
+                                         sources: brief.claims["c3"]!.sources) {
+        report.check(flat.recheckOutcome(forSentence: "s4") != .unchanged,
+                     "独立源数持平不算变少")
+    }
+
     return (report.pass, report.fail)
+}
+
+/// 把 brief 编码回 JSON、换掉 `recheckResults`、再解回来。
+/// `recheckResults` 是 `let`，构造坏数据只能走这条路——而这恰好也是真管线
+/// 将来把数据递进来的那条路，所以这份坏数据是可能真的出现的那一种。
+@MainActor
+func briefWithRecheckResult(_ base: Brief,
+                            claimId: String,
+                            independence: Int,
+                            sources: [SourceRef]) -> Brief? {
+    guard let encoded = try? JSONEncoder().encode(base),
+          var raw = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+    else { return nil }
+    raw["recheckResults"] = [
+        claimId: [
+            "id": claimId,
+            "independence": independence,
+            "mergedAwayCount": 0,
+            "sources": sources.map { ["publisher": $0.publisher, "note": $0.note, "time": $0.time] }
+        ]
+    ]
+    guard let data = try? JSONSerialization.data(withJSONObject: raw) else { return nil }
+    return try? JSONDecoder().decode(Brief.self, from: data)
 }

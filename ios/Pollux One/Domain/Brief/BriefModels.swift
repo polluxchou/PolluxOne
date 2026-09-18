@@ -49,6 +49,10 @@ struct Brief: Codable, Equatable, Identifiable {
     let pacedToUser: Bool
     var sentences: [BriefSentence]
     var claims: [String: ClaimEvidence]
+    /// claimId → 「重查之后」的证据。没有条目 = 那一条重查也找不到新的独立源。
+    /// 可选，因为真管线接上之前它只存在于 fixture 里；旧数据解出来就是 nil，
+    /// 那时每一次重查都诚实地答「没找到」，而不是解码失败。
+    let recheckResults: [String: ClaimEvidence]?
     /// `var`，只因为等待页要在本地把它一格一格往前推（`advancingStages()`）。
     /// 阶段是这份数据里唯一随时间变的东西，其余仍然是 `let`。
     var stages: [BriefStage]
