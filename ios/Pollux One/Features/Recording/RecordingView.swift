@@ -11,7 +11,9 @@ import SwiftUI
 /// both of which land inside the safe-area insets.
 struct RecordingView: View {
     @State private var viewModel: RecordingViewModel
-    let script: Script
+    /// 可选：相机是根视图，开机时通常没有稿。提词块整块随它隐藏，
+    /// 快门不随它隐藏——没有稿也照样能拍。
+    let script: Script?
 
     @State private var focusPoint: CGPoint?
     @State private var focusHideTask: Task<Void, Never>?
@@ -47,13 +49,8 @@ struct RecordingView: View {
         static let bottomScrimHeight: CGFloat = 270
     }
 
-    init(script: Script, syncService: ScriptSyncService, takeArchiver: TakeArchiver) {
+    init(script: Script?, sessionManager: SessionManager) {
         self.script = script
-        let sessionManager = SessionManager(
-            syncService: syncService,
-            alignmentEngine: SlidingWindowAlignmentEngine(),
-            takeArchiver: takeArchiver
-        )
         _viewModel = State(initialValue: RecordingViewModel(sessionManager: sessionManager))
     }
 
@@ -113,7 +110,19 @@ struct RecordingView: View {
         // nothing competes with the preview or crowds the prompter near the
         // lens. Edge-swipe still returns to the script list.
         .toolbar(.hidden, for: .navigationBar)
-        .task { await viewModel.start(script: script) }
+        // Keyed on the script, not fire-once: the session now outlives this
+        // view, so opening a different script has to reload the engines
+        // instead of relying on a fresh SessionManager to do it.
+        //
+        // With no script there is still a camera to bring up — the viewfinder
+        // and the shutter are not the prompter's dependents.
+        .task(id: script?.id) {
+            if let script {
+                await viewModel.start(script: script)
+            } else {
+                await viewModel.sessionManager.cameraEngine.requestAuthorizationAndConfigure()
+            }
+        }
         .onChange(of: viewModel.activeParameter) { _, _ in scheduleFocusReticleHide() }
         .onDisappear { viewModel.sessionManager.teardown() }
     }
@@ -150,57 +159,62 @@ struct RecordingView: View {
             .padding(.horizontal, 18)
             .topAnchored(Offset.statusRowTop)
 
-            // The engine, not values read off it. `@Observable` registers a
-            // dependency against whichever body performed the read, so reading
-            // `inLineProgress` and `readingProgress` here made two 30Hz
-            // properties invalidate all of this body — and with it the overlay,
-            // which carries closures and so cannot be equated away, and with
-            // that the whole-script ForEach inside it. Measured: 10 changes to
-            // `inLineProgress` produced 10 runs of this body and 10 of the
-            // overlay's. The engine splits those two out from `displayState`
-            // precisely so they invalidate only the fill and the rail; passing
-            // pre-read values handed that split straight back.
-            //
-            // `teleprompterEngine` and `sessionManager` are both `let`, which
-            // `@Observable` does not track, so naming them here costs nothing.
-            TeleprompterOverlayView(
-                engine: viewModel.sessionManager.teleprompterEngine,
-                textSize: viewModel.teleprompterSettings.textSize,
-                micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
-                cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
-                onTap: { viewModel.openTeleprompterAdjust() },
-                onLayoutChange: { width, measurer in
-                    viewModel.sessionManager.teleprompterEngine.setLayout(width: width, measurer: measurer)
+            // No script, no prompter — the whole block goes, rather than
+            // leaving an empty column of scrim where text should be. The
+            // shutter below is untouched: you can shoot without a script.
+            if script != nil {
+                // The engine, not values read off it. `@Observable` registers a
+                // dependency against whichever body performed the read, so reading
+                // `inLineProgress` and `readingProgress` here made two 30Hz
+                // properties invalidate all of this body — and with it the overlay,
+                // which carries closures and so cannot be equated away, and with
+                // that the whole-script ForEach inside it. Measured: 10 changes to
+                // `inLineProgress` produced 10 runs of this body and 10 of the
+                // overlay's. The engine splits those two out from `displayState`
+                // precisely so they invalidate only the fill and the rail; passing
+                // pre-read values handed that split straight back.
+                //
+                // `teleprompterEngine` and `sessionManager` are both `let`, which
+                // `@Observable` does not track, so naming them here costs nothing.
+                TeleprompterOverlayView(
+                    engine: viewModel.sessionManager.teleprompterEngine,
+                    textSize: viewModel.teleprompterSettings.textSize,
+                    micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
+                    cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
+                    onTap: { viewModel.openTeleprompterAdjust() },
+                    onLayoutChange: { width, measurer in
+                        viewModel.sessionManager.teleprompterEngine.setLayout(width: width, measurer: measurer)
+                    }
+                )
+                // The Width slider had never been wired to anything: this is the
+                // first thing that reads textWidthFraction. It has to be applied
+                // here rather than inside the overlay, because the fraction is of
+                // the screen, and it is what decides where lines break.
+                //
+                // The fraction is of the space that is *left* once both insets are
+                // taken out, not of the whole screen. Taking it of the whole screen
+                // and then adding a leading padding makes the padded block
+                // `width × fraction + 20` wide, which at Width = 1.0 is wider than
+                // the screen — and an oversized child is centred by the anchor
+                // below whatever its alignment says, so the block hung 10pt off
+                // *both* edges. Subtracting first keeps the fraction as the single
+                // master of the column's width while making the left inset exactly
+                // 20 at every slider position.
+                .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+                    (width - Offset.teleprompterLeading - Offset.teleprompterTrailing)
+                        * viewModel.teleprompterSettings.textWidthFraction
                 }
-            )
-            // The Width slider had never been wired to anything: this is the
-            // first thing that reads textWidthFraction. It has to be applied
-            // here rather than inside the overlay, because the fraction is of
-            // the screen, and it is what decides where lines break.
-            //
-            // The fraction is of the space that is *left* once both insets are
-            // taken out, not of the whole screen. Taking it of the whole screen
-            // and then adding a leading padding makes the padded block
-            // `width × fraction + 20` wide, which at Width = 1.0 is wider than
-            // the screen — and an oversized child is centred by the anchor
-            // below whatever its alignment says, so the block hung 10pt off
-            // *both* edges. Subtracting first keeps the fraction as the single
-            // master of the column's width while making the left inset exactly
-            // 20 at every slider position.
-            .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
-                (width - Offset.teleprompterLeading - Offset.teleprompterTrailing)
-                    * viewModel.teleprompterSettings.textWidthFraction
+                .opacity(viewModel.teleprompterSettings.opacity)
+                .offset(y: viewModel.teleprompterSettings.verticalOffset)
+                .padding(.leading, Offset.teleprompterLeading)
+                // `.topLeading`, not the default `.top`: `.top`'s horizontal
+                // component is `.center`, which was a no-op while the overlay
+                // filled the offered width and started sliding the whole block
+                // sideways the moment containerRelativeFrame made it narrower.
+                // Measured in a 393pt container, the default fraction put the left
+                // edge at 37.51 instead of 20, and dragging the slider moved it.
+                .topAnchored(Offset.teleprompterTop, alignment: .topLeading)
             }
-            .opacity(viewModel.teleprompterSettings.opacity)
-            .offset(y: viewModel.teleprompterSettings.verticalOffset)
-            .padding(.leading, Offset.teleprompterLeading)
-            // `.topLeading`, not the default `.top`: `.top`'s horizontal
-            // component is `.center`, which was a no-op while the overlay
-            // filled the offered width and started sliding the whole block
-            // sideways the moment containerRelativeFrame made it narrower.
-            // Measured in a 393pt container, the default fraction put the left
-            // edge at 37.51 instead of 20, and dragging the slider moved it.
-            .topAnchored(Offset.teleprompterTop, alignment: .topLeading)
         }
     }
 

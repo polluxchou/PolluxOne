@@ -4,6 +4,11 @@ import SwiftUI
 /// writing happens on Web; iOS only needs enough here to pick a script and
 /// jump into Recording (Feature 1).
 struct ScriptListView: View {
+    // The capture session is app-lifetime now, so this screen hands the one
+    // that already exists to RecordingView rather than letting it build its
+    // own. Read from the environment because RootView's call site belongs to
+    // another change in flight.
+    @Environment(AppEnvironment.self) private var environment
     @State private var viewModel: ScriptListViewModel
     private let syncService: ScriptSyncService
     private let takeArchiver: TakeArchiver
@@ -30,8 +35,7 @@ struct ScriptListView: View {
                         NavigationLink {
                             RecordingView(
                                 script: script,
-                                syncService: syncService,
-                                takeArchiver: takeArchiver
+                                sessionManager: environment.sessionManager
                             )
                         } label: {
                             ScriptRow(script: script)
