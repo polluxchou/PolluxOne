@@ -1437,26 +1437,9 @@ struct CountPill: View {
     }
 }
 
-/// ②③④ 共用：新闻收成一行标签，减少页面占用（spec §8 ④）。
-struct NewsTag: View {
-    let news: NewsRef
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(news.publisher)
-                .font(.system(size: 10.5))
-                .padding(.horizontal, 6).padding(.vertical, 2)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 4))
-            Text(news.title)
-                .font(.system(size: 13))
-                .lineLimit(1)
-                .truncationMode(.tail)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 24)
-        .padding(.top, 8)
-    }
-}
+// NewsTag 不在这里定义 —— Task 12 已经把它提成了独立文件
+// `ios/Pollux One/Features/Brief/NewsTag.swift`（BriefProgressView 也要用它）。
+// 在这里再写一遍会重复定义、编译失败。直接用即可。
 ```
 
 - [ ] **Step 4: 编译、提交**
@@ -1482,6 +1465,16 @@ EOF
 ---
 
 ## Task 9: ② 左滑按句子类型分化
+
+> **执行顺序注意（写计划时没看出来的循环依赖）：** Task 8 的 `ReviewView` 引用
+> `SwipeableSentenceRow`，而那是本任务造的；本任务又要改 Task 8 才创建的
+> `SentenceRow.swift`。两边互相等。
+>
+> 拆法：**本任务只做 Domain 那一半**——`SwipeActions.swift` + 断言 + 测试台，
+> 不碰任何 View。`SwipeableSentenceRow` 连同手势接线归到 Task 8 一起做，
+> 那时 `SwipeActions` 已经在了。所以本任务的 Step 3（"在 View 上接手势"）
+> **跳过**，Files 里的 `SentenceRow.swift` 一行也不要动。
+
 
 **Files:**
 - Create: `ios/Pollux One/Domain/Brief/SwipeActions.swift`
