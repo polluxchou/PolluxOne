@@ -27,11 +27,15 @@ export interface Selection {
  * 至于进稿的这几条怎么排、钩子怎么下，那是编辑判断，交给模型（下一个计划）。
  */
 export function selectClaims(claims: VerifiedClaim[], factSlots: number): Selection {
-  // `slice(0, -1)` 返回的是「除最后一个之外的全部」，不是空数组——名额传成负数
-  // 会产出一篇**比该有的更满**的稿子，正是这一阶段要防的方向。
-  // 名额来自 estimateBrief，那边保证 ≥ 3；走到这里说明调用方传错了。
-  if (!Number.isInteger(factSlots) || factSlots < 0) {
-    throw new Error(`factSlots must be a non-negative integer, got ${factSlots}`);
+  // 两件事：`slice(0, -1)` 返回的是「除最后一个之外的全部」而不是空数组，所以
+  // 名额传成负数会产出一篇**比该有的更满**的稿子；而名额小于三，则装不下
+  // §5.1 要求的三条 strong 打底，于是会得到一篇 verdict 为 ok、却只有两条
+  // 事实的稿子。后者原本只是因为 estimateBrief 的 minimumFactSlots 恰好是 3
+  // 才没发生——那个底线不该寄存在另一个模块的系数里。
+  if (!Number.isInteger(factSlots) || factSlots < MINIMUM_STRONG_CLAIMS) {
+    throw new Error(
+      `factSlots must be an integer of at least ${MINIMUM_STRONG_CLAIMS}, got ${factSlots}`,
+    );
   }
 
   const conflicted = claims.filter((c) => c.confidence === "conflicted").map((c) => c.id);

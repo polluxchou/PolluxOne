@@ -55,10 +55,12 @@ test("a refusal still reports what was in conflict", () => {
 
 test("a nonsensical slot count is a caller error, not an empty script", () => {
   // slice(0, -1) 返回的是「除最后一个之外的全部」，所以负数名额会**多**出稿，
-  // 不是不出稿。名额来自 estimateBrief（保证 ≥ 3），走到这里就是调用方错了。
+  // 不是不出稿。名额小于三则装不下 §5.1 要求的三条 strong 打底。
+  // 名额来自 estimateBrief（保证 ≥ 3），走到这里就是调用方错了。
   const claims = [claim("c0", "strong", 3), claim("c1", "strong", 3), claim("c2", "strong", 3)];
   expect(() => selectClaims(claims, -1)).toThrow(/factSlots/);
   expect(() => selectClaims(claims, 2.5)).toThrow(/factSlots/);
+  expect(() => selectClaims(claims, 2)).toThrow(/at least 3/);
 });
 
 test("a long duration does not lower the bar", () => {

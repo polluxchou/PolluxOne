@@ -22,6 +22,9 @@ export interface SourceGroup {
  *    或滑窗级相似度。
  * 2. 两家门户都写「据新华社报道」、而新华社原稿不在本次信源集合里时，rule 2 不匹配
  *    ——它比的是 `a.creditedTo === b.publisher`，不是两边 `creditedTo` 相等。
+ * 3. rule 3 和 mediaGroups 查表都是 publisher 字符串的**精确相等**。抓取时把同一家
+ *    记成「新华社」和「新华网」、或者多带一个空格、或者全角半角不一致，这一家就被
+ *    劈成两个独立源。前两条难在语义，这一条只是字符串没有归一化——反而更容易发生。
  *
  * @param mediaGroups publisher → 媒体集团 key 的映射。同集团视为同一主体。
  */

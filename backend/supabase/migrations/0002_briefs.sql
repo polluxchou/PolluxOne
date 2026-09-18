@@ -119,6 +119,26 @@ create policy "claim_facts follow their claim" on claim_facts
     )
   );
 
+-- 谁和谁冲突。只在 brief_claims 上记一个 confidence = 'conflicted' 是不够的：
+-- 「不建议播」那一屏要把冲突双方并排摆给用户看（路透 23 亿 vs 彭博 31 亿），
+-- 光知道「这条有冲突」没法渲染。管线两边都写一行，读的时候按 claim_id 查即可。
+create table claim_conflicts (
+  claim_id uuid not null references brief_claims (id) on delete cascade,
+  conflicts_with uuid not null references brief_claims (id) on delete cascade,
+  primary key (claim_id, conflicts_with),
+  check (claim_id <> conflicts_with)
+);
+
+alter table claim_conflicts enable row level security;
+
+create policy "claim_conflicts follow their claim" on claim_conflicts
+  for all using (
+    exists (
+      select 1 from brief_claims c join briefs b on b.id = c.brief_id
+      where c.id = claim_conflicts.claim_id and b.user_id = auth.uid()
+    )
+  );
+
 -- ---------------------------------------------------------------------------
 -- 证据层：挂在 Script 旁边，Script 自己不加字段（§4.1）
 -- ---------------------------------------------------------------------------
@@ -145,25 +165,36 @@ create policy "script_evidence follows its script" on script_evidence
     )
   );
 
--- 气口与重读。同样挂在旁边——sentences 表不加列（§9.2 ⑤）
-create table sentence_prosody (
-  sentence_id uuid primary key references sentences (id) on delete cascade,
-  breath_after text check (breath_after in ('long', 'short', 'none')),
-  emphasis_spans jsonb not null default '[]'::jsonb
+-- 气口。同样挂在旁边——sentences 表不加列（§9.2 ⑤）
+--
+-- **一句多行**，不是一句一行：`breathMarks` 对每个句内逗号都吐一个带位置的
+-- short，句末再吐一个 long。做成每句单个枚举的话，那一列永远只会是 'long'，
+-- 而提词器真正用来配速的句内短气口全部无处可去。
+--
+-- check 约束把 TS 侧的判别联合固化在这里：short 必须带位置，long 必须不带。
+-- 重读（emphasis）目前没有任何代码产出，等有了再单独建表。
+create table sentence_breaths (
+  id uuid primary key default gen_random_uuid(),
+  sentence_id uuid not null references sentences (id) on delete cascade,
+  kind text not null check (kind in ('long', 'short')),
+  char_offset integer,
+  check ((kind = 'short') = (char_offset is not null))
 );
 
-alter table sentence_prosody enable row level security;
+alter table sentence_breaths enable row level security;
 
-create policy "sentence_prosody follows its script" on sentence_prosody
+create policy "sentence_breaths follow their script" on sentence_breaths
   for all using (
     exists (
       select 1 from sentences s
       join paragraphs p on p.id = s.paragraph_id
       join script_sections sec on sec.id = p.section_id
       join scripts sc on sc.id = sec.script_id
-      where s.id = sentence_prosody.sentence_id and sc.user_id = auth.uid()
+      where s.id = sentence_breaths.sentence_id and sc.user_id = auth.uid()
     )
   );
+
+create index sentence_breaths_sentence_idx on sentence_breaths (sentence_id);
 
 -- ---------------------------------------------------------------------------
 -- 实测语速。这份数据目前根本不存在（§9.2 ①）——本迁移只建表，
