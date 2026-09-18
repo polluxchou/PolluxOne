@@ -37,6 +37,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/Brief/AnchorRuns.swift" \
   "$IOS/Domain/Brief/ScriptSlot.swift" \
   "$IOS/Domain/Brief/SwipeActions.swift" \
+  "$IOS/Domain/Brief/HandOffState.swift" \
   "$IOS/Engines/ScriptAlignmentEngine.swift" \
   "$IOS/Engines/ReadingPacer.swift" \
   "$IOS/Engines/TeleprompterEngine.swift" \

@@ -248,5 +248,34 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     row.drag(to: -9999)
     report.check(row.offset >= -144, "再怎么拉也不超过按钮宽度", detail: "\(row.offset)")
 
+    report.section("③ 交给我")
+    report.check(HandOffState(mode: .typing).inputFieldCount == 1,
+                 "链接和正文共用一个框，不是两个")
+    report.check(HandOffState(mode: .speaking).inputFieldCount == 0,
+                 "语音档没有文字框")
+
+    report.check(!HandOffState(mode: .typing, clipboardAuthorized: false,
+                               clipboardHasContent: true).showsClipboardBar,
+                 "未授权时整条快捷条不出现，而不是显示一个禁用按钮")
+    report.check(!HandOffState(mode: .typing, clipboardAuthorized: true,
+                               clipboardHasContent: false).showsClipboardBar,
+                 "剪贴板为空时也不出现")
+    report.check(HandOffState(mode: .typing, clipboardAuthorized: true,
+                              clipboardHasContent: true).showsClipboardBar,
+                 "授权且有内容才出现")
+    report.check(!HandOffState(mode: .speaking, clipboardAuthorized: true,
+                               clipboardHasContent: true).showsClipboardBar,
+                 "语音档没有剪贴板条")
+
+    report.check(HandOffState(mode: .typing).secondaryEntries == [.screenshot, .shareSheet],
+                 "截图与分享并列——东西都在别处")
+
+    var handOff = HandOffState(mode: .typing)
+    report.check(!handOff.canProceed, "空输入不能往下走")
+    handOff.text = "   "
+    report.check(!handOff.canProceed, "只有空白也不行")
+    handOff.text = "https://example.com/news"
+    report.check(handOff.canProceed, "有内容才能走")
+
     return (report.pass, report.fail)
 }
