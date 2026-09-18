@@ -19,6 +19,7 @@ PolluxOne/
 ├── ios/          Swift / SwiftUI / AVFoundation — Xcode 工程 (Pollux One.xcodeproj)
 ├── web/          Next.js 16 + React 19 + Supabase — Script 编写控制台
 ├── backend/      Supabase schema / RLS migrations
+├── pipeline/     「新闻 → 口播稿」调研管线（TypeScript，零运行时依赖）
 └── docs/         （预留）
 ```
 
