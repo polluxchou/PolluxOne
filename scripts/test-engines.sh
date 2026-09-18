@@ -33,6 +33,7 @@ swiftc -O -swift-version 5 -default-isolation MainActor \
   "$IOS/Domain/Brief/BriefStage.swift" \
   "$IOS/Domain/Brief/BriefFixture.swift" \
   "$IOS/Domain/Brief/BriefEdits.swift" \
+  "$IOS/Domain/Brief/SentenceStyle.swift" \
   "$IOS/Domain/Brief/ScriptSlot.swift" \
   "$IOS/Engines/ScriptAlignmentEngine.swift" \
   "$IOS/Engines/ReadingPacer.swift" \

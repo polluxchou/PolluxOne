@@ -153,5 +153,31 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
     report.check(brief.deletingSentence("no-such-id").sentences.count == brief.sentences.count,
                  "删一个不存在的 id 不改变任何东西")
 
+    report.section("句子着色")
+    report.check(SentenceStyle(kind: .fact, independence: 4).accent == .strong, "4 个源是绿的")
+    report.check(SentenceStyle(kind: .fact, independence: 3).accent == .strong, "3 个源到线")
+    report.check(SentenceStyle(kind: .fact, independence: 1).accent == .weak, "1 个源是警告色")
+    report.check(!SentenceStyle(kind: .fact, independence: 4).isDashed, "事实句是实线")
+
+    let opinionStyle = SentenceStyle(kind: .opinion, independence: 9)
+    report.check(opinionStyle.accent == .neutral,
+                 "观点句永远不着有信源的颜色，哪怕传进来一个大数")
+    report.check(opinionStyle.isDashed, "观点句是虚线")
+    report.check(SentenceStyle(kind: .transition, independence: 0).accent == .neutral,
+                 "钩子句中性")
+    report.check(!SentenceStyle(kind: .transition, independence: 0).isDashed, "钩子句实线")
+
+    // s2 挂 c1(3) 和 c2(3)，取最弱 = 3 → strong
+    report.check(SentenceStyle(sentence: brief.sentences[1], claims: brief.claims).accent == .strong,
+                 "多 claim 的句子按最弱的那个定色")
+
+    report.section("顶部三个 pill")
+    let counts = SentenceCounts(brief.sentences, claims: brief.claims)
+    report.check(counts.strong == 2, "绿：s2 s3", detail: "\(counts.strong)")
+    report.check(counts.weak == 1, "黄：s4", detail: "\(counts.weak)")
+    report.check(counts.unsourced == 2, "灰：s1 s5", detail: "\(counts.unsourced)")
+    report.check(counts.strong + counts.weak + counts.unsourced == brief.sentences.count,
+                 "三个数加起来等于句数，不重不漏")
+
     return (report.pass, report.fail)
 }
