@@ -1,0 +1,444 @@
+{
+  "id": "b-demo-beiyu-climate-fund",
+  "news": {
+    "publisher": "环屿通讯社",
+    "title": "北屿南川牵头设立 120 亿美元气候适应基金，42 国签署",
+    "url": "https://example.com/huanyu-wire/2026/climate-fund"
+  },
+  "status": "ready",
+  "estimatedSeconds": 80,
+  "pacedToUser": false,
+  "sentences": [
+    {
+      "id": "s1",
+      "text": "钱从哪里来、什么时候到、最后怎么退场——气候承诺能不能兑现，往往就藏在这几个细节里。",
+      "kind": "transition",
+      "claimIds": [],
+      "anchors": []
+    },
+    {
+      "id": "s2",
+      "text": "今天发布的联合公报正式确定由北屿与南川两国牵头的气候适应基金。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s3",
+      "text": "基金规模为120亿美元，共有42个国家签署公报。",
+      "kind": "fact",
+      "claimIds": [
+        "c1",
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 5,
+          "length": 6,
+          "claimId": "c1"
+        },
+        {
+          "start": 14,
+          "length": 5,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "text": "首笔拨款为8亿美元，公报列出的时间表显示，这笔钱定于明年一季度划出。",
+      "kind": "fact",
+      "claimIds": [
+        "c4",
+        "c8"
+      ],
+      "anchors": [
+        {
+          "start": 5,
+          "length": 4,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "text": "白石湾日报查阅了北屿与南川发布的联合公报全文以及随附的三份附件。",
+      "kind": "fact",
+      "claimIds": [
+        "c7"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s6",
+      "text": "公报提到，相关资金将优先用于岛屿国家的海岸防护工程。",
+      "kind": "fact",
+      "claimIds": [
+        "c5"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s7",
+      "text": "两个排放大国没有出现在签署名单上。",
+      "kind": "fact",
+      "claimIds": [
+        "c12"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s8",
+      "text": "芜洲晚报驻外记者参加了公报发布会并在现场提问。",
+      "kind": "fact",
+      "claimIds": [
+        "c10"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s9",
+      "text": "官员在回答资金来源提问时称，资金来自成员国财政预算而不是私人部门。",
+      "kind": "fact",
+      "claimIds": [
+        "c11"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s10",
+      "text": "多国代表在会后表示，执行细则仍然需要进一步谈判，尤其是核查口径。",
+      "kind": "fact",
+      "claimIds": [
+        "c9"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s11",
+      "text": "公报全文没有写明退出机制。",
+      "kind": "fact",
+      "claimIds": [
+        "c6"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s12",
+      "text": "基金的治理结构尚未公布。",
+      "kind": "fact",
+      "claimIds": [
+        "c16"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s13",
+      "text": "北崖观察就这只气候基金采访了三位政策研究者。",
+      "kind": "fact",
+      "claimIds": [
+        "c14"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s14",
+      "text": "历史上多只同类基金的实际拨付率不足六成。",
+      "kind": "fact",
+      "claimIds": [
+        "c15"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s15",
+      "text": "从首笔拨款的时间表到尚未公布的治理结构，这只基金的真正考验不在今天的数字，而在明年第一季度之后，资金是否按承诺落地、执行细则能否谈出结果。",
+      "kind": "opinion",
+      "claimIds": [],
+      "anchors": []
+    }
+  ],
+  "claims": {
+    "c0": {
+      "id": "c0",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「北屿与南川两国牵头的气候适应基金在今日发布的联合公报中正式确定。」",
+          "time": "21:00"
+        }
+      ]
+    },
+    "c1": {
+      "id": "c1",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「基金规模 120 亿美元。」",
+          "time": "21:00"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「基金规模 120 亿美元。」",
+          "time": "22:35"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「基金规模 120 亿美元。」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「公报由 42 个国家签署。」",
+          "time": "21:00"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「公报由 42 个国家签署。」",
+          "time": "22:35"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「公报由 42 个国家签署。」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c4": {
+      "id": "c4",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「首笔拨款 8 亿美元。」",
+          "time": "21:00"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「首笔拨款 8 亿美元。」",
+          "time": "22:35"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「首笔拨款 8 亿美元。」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c5": {
+      "id": "c5",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「公报提到，这笔钱将优先用于岛屿国家的海岸防护工程」",
+          "time": "21:00"
+        }
+      ]
+    },
+    "c6": {
+      "id": "c6",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「但全文没有写明退出机制。」",
+          "time": "21:00"
+        }
+      ]
+    },
+    "c7": {
+      "id": "c7",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "白石湾日报",
+          "note": "「白石湾日报查阅了北屿与南川发布的联合公报全文以及随附的三份附件。」",
+          "time": "22:35"
+        }
+      ]
+    },
+    "c8": {
+      "id": "c8",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "白石湾日报",
+          "note": "「公报列出的时间表显示这笔钱定于明年一季度划出」",
+          "time": "22:35"
+        }
+      ]
+    },
+    "c9": {
+      "id": "c9",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "白石湾日报",
+          "note": "「多国代表在会后表示，执行细则仍然需要进一步谈判，尤其是核查口径。」",
+          "time": "22:35"
+        }
+      ]
+    },
+    "c10": {
+      "id": "c10",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "芜洲晚报",
+          "note": "「芜洲晚报驻外记者参加了公报发布会并在现场提问。」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c11": {
+      "id": "c11",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "芜洲晚报",
+          "note": "「官员在回答资金来源的提问时说，这笔钱来自成员国的财政预算而不是私人部门」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c12": {
+      "id": "c12",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "芜洲晚报",
+          "note": "「两个排放大国没有出现在签署名单上」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c14": {
+      "id": "c14",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「北崖观察就这只气候基金采访了三位政策研究者。」",
+          "time": "10:55"
+        }
+      ]
+    },
+    "c15": {
+      "id": "c15",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「历史上多只同类基金的实际拨付率不足六成。」",
+          "time": "10:55"
+        }
+      ]
+    },
+    "c16": {
+      "id": "c16",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「基金的治理结构尚未公布」",
+          "time": "10:55"
+        }
+      ]
+    }
+  },
+  "recheckResults": null,
+  "stages": [
+    {
+      "name": "抓取原文",
+      "state": "done",
+      "count": "1 篇",
+      "detail": null
+    },
+    {
+      "name": "扩展检索",
+      "state": "done",
+      "count": "4 篇",
+      "detail": null
+    },
+    {
+      "name": "抽取事实点",
+      "state": "done",
+      "count": "31 条",
+      "detail": null
+    },
+    {
+      "name": "归并去重",
+      "state": "done",
+      "count": "17 点 · 4 独立源",
+      "detail": null
+    },
+    {
+      "name": "交叉验证",
+      "state": "done",
+      "count": "3 / 17",
+      "detail": null
+    },
+    {
+      "name": "选点",
+      "state": "done",
+      "count": "5 条",
+      "detail": null
+    },
+    {
+      "name": "成稿",
+      "state": "done",
+      "count": "15 句",
+      "detail": null
+    },
+    {
+      "name": "挂信源",
+      "state": "done",
+      "count": "13 句挂上",
+      "detail": null
+    },
+    {
+      "name": "时长与气口",
+      "state": "done",
+      "count": "80 秒 · 29 个气口",
+      "detail": null
+    }
+  ],
+  "budget": {
+    "used": 32619,
+    "budgeted": 125500,
+    "remainingThisMonth": 3000000,
+    "costCents": 18,
+    "byStage": {
+      "抽取事实点": 11853,
+      "交叉验证": 12629,
+      "成稿": 8137
+    }
+  },
+  "insufficientReason": null
+}

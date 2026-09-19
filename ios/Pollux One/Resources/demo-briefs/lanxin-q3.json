@@ -1,0 +1,386 @@
+{
+  "id": "b-demo-lanxin-q3",
+  "news": {
+    "publisher": "东岭日报",
+    "title": "岚芯半导体三季报：营收 48.6 亿元，新厂 2027 年投产",
+    "url": "https://example.com/dongling-daily/2026/lanxin-q3"
+  },
+  "status": "ready",
+  "estimatedSeconds": 79,
+  "pacedToUser": false,
+  "sentences": [
+    {
+      "id": "s1",
+      "text": "你有没有想过，一份芯片公司的季报，可能比发布会更早透露明年供应链的松紧？",
+      "kind": "transition",
+      "claimIds": [],
+      "anchors": []
+    },
+    {
+      "id": "s2",
+      "text": "岚芯半导体的三季报已于昨日晚间发布，这也是它上市之后的第七份季报。",
+      "kind": "fact",
+      "claimIds": [
+        "c8",
+        "c1"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s3",
+      "text": "第三季度营收 48.6 亿元，报告期内研发投入 9.4 亿元。",
+      "kind": "fact",
+      "claimIds": [
+        "c2",
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 7,
+          "length": 7,
+          "claimId": "c2"
+        },
+        {
+          "start": 24,
+          "length": 6,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "text": "十二英寸新厂，也就是晶圆直径十二英寸的工厂，将于 2027 年 3 月投产。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 25,
+          "length": 10,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "text": "管理层在业绩说明会上回答了投资者关于产能爬坡节奏的提问；产能爬坡节奏，说白了就是新厂从试产到满产要跑多快。",
+      "kind": "fact",
+      "claimIds": [
+        "c6"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s6",
+      "text": "管理层称首批客户的验证流程已经启动；验证流程，就是客户先拿样品测试，确认芯片能用、达标。",
+      "kind": "fact",
+      "claimIds": [
+        "c7"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s7",
+      "text": "北崖观察记者向岚芯半导体投资者关系部门逐项核实了披露文件里的关键数字。",
+      "kind": "fact",
+      "claimIds": [
+        "c10"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s8",
+      "text": "记者另从两家上游材料供应商处了解到，四季度的备货订单已经下达，交付窗口排到了明年一季度。",
+      "kind": "fact",
+      "claimIds": [
+        "c11",
+        "c12"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s9",
+      "text": "多家机构连夜更新了模型。",
+      "kind": "fact",
+      "claimIds": [
+        "c9"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s10",
+      "text": "潮白证券研究所今日发布财报点评，提到该数字与部分媒体援引的口径存在差异，差异主要来自一次性资产处置收益的计入方式；一次性资产处置收益，简单说就是卖资产一次性确认的利润。",
+      "kind": "fact",
+      "claimIds": [
+        "c13",
+        "c15"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s11",
+      "text": "在我看来，产能和验证进展，比单季营收数字更值得长期跟踪。",
+      "kind": "opinion",
+      "claimIds": [],
+      "anchors": []
+    }
+  ],
+  "claims": {
+    "c1": {
+      "id": "c1",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「这是它上市之后的第七份季报」",
+          "time": "08:40"
+        }
+      ]
+    },
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「公司第三季度营收 48.6 亿元」",
+          "time": "08:40"
+        },
+        {
+          "publisher": "星桥财经社",
+          "note": "「公司第三季度营收 48.6 亿元」",
+          "time": "09:12"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「公司第三季度营收 48.6 亿元。」",
+          "time": "10:05"
+        }
+      ]
+    },
+    "c3": {
+      "id": "c3",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「报告期内研发投入 9.4 亿元」",
+          "time": "08:40"
+        },
+        {
+          "publisher": "星桥财经社",
+          "note": "「报告期内研发投入 9.4 亿元」",
+          "time": "09:12"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「报告期内研发投入 9.4 亿元。」",
+          "time": "10:05"
+        }
+      ]
+    },
+    "c4": {
+      "id": "c4",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「十二英寸新厂将于 2027 年 3 月投产」",
+          "time": "08:40"
+        },
+        {
+          "publisher": "星桥财经社",
+          "note": "「十二英寸新厂将于 2027 年 3 月投产」",
+          "time": "09:12"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「十二英寸新厂将于 2027 年 3 月投产。」",
+          "time": "10:05"
+        }
+      ]
+    },
+    "c6": {
+      "id": "c6",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「管理层在业绩说明会上回答了投资者关于产能爬坡节奏的提问」",
+          "time": "08:40"
+        }
+      ]
+    },
+    "c7": {
+      "id": "c7",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「称首批客户的验证流程已经启动」",
+          "time": "08:40"
+        }
+      ]
+    },
+    "c8": {
+      "id": "c8",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "星桥财经社",
+          "note": "「岚芯半导体的三季报已于昨日晚间发布」",
+          "time": "09:12"
+        }
+      ]
+    },
+    "c9": {
+      "id": "c9",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "星桥财经社",
+          "note": "「多家机构连夜更新了模型」",
+          "time": "09:12"
+        }
+      ]
+    },
+    "c10": {
+      "id": "c10",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「北崖观察记者向岚芯半导体投资者关系部门逐项核实了披露文件里的关键数字。」",
+          "time": "10:05"
+        }
+      ]
+    },
+    "c11": {
+      "id": "c11",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「记者另从两家上游材料供应商处了解到，四季度的备货订单已经下达」",
+          "time": "10:05"
+        }
+      ]
+    },
+    "c12": {
+      "id": "c12",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「交付窗口排到了明年一季度」",
+          "time": "10:05"
+        }
+      ]
+    },
+    "c13": {
+      "id": "c13",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "潮白证券研究所",
+          "note": "「潮白证券研究所今日发布财报点评。」",
+          "time": "11:48"
+        }
+      ]
+    },
+    "c15": {
+      "id": "c15",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "潮白证券研究所",
+          "note": "「这个数字与部分媒体援引的口径存在差异，差异主要来自一次性资产处置收益的计入方式。」",
+          "time": "11:48"
+        }
+      ]
+    }
+  },
+  "recheckResults": null,
+  "stages": [
+    {
+      "name": "抓取原文",
+      "state": "done",
+      "count": "1 篇",
+      "detail": null
+    },
+    {
+      "name": "扩展检索",
+      "state": "done",
+      "count": "4 篇",
+      "detail": null
+    },
+    {
+      "name": "抽取事实点",
+      "state": "done",
+      "count": "27 条",
+      "detail": null
+    },
+    {
+      "name": "归并去重",
+      "state": "done",
+      "count": "16 点 · 4 独立源",
+      "detail": null
+    },
+    {
+      "name": "交叉验证",
+      "state": "done",
+      "count": "3 / 16",
+      "detail": null
+    },
+    {
+      "name": "选点",
+      "state": "done",
+      "count": "4 条",
+      "detail": null
+    },
+    {
+      "name": "成稿",
+      "state": "done",
+      "count": "11 句",
+      "detail": null
+    },
+    {
+      "name": "挂信源",
+      "state": "done",
+      "count": "9 句挂上",
+      "detail": null
+    },
+    {
+      "name": "时长与气口",
+      "state": "done",
+      "count": "79 秒 · 31 个气口",
+      "detail": null
+    }
+  ],
+  "budget": {
+    "used": 35656,
+    "budgeted": 93500,
+    "remainingThisMonth": 3000000,
+    "costCents": 18,
+    "byStage": {
+      "抽取事实点": 8695,
+      "交叉验证": 19993,
+      "成稿": 6968
+    }
+  },
+  "insufficientReason": null
+}

@@ -1,0 +1,412 @@
+{
+  "id": "b-demo-dongling-metro-7",
+  "news": {
+    "publisher": "东岭日报",
+    "title": "东岭轨道交通城西线 10 月 26 日开通试运营",
+    "url": "https://example.com/dongling-daily/2026/metro-chengxi-line"
+  },
+  "status": "ready",
+  "estimatedSeconds": 70,
+  "pacedToUser": false,
+  "sentences": [
+    {
+      "id": "s1",
+      "text": "早高峰堵在路上刷手机的你，可能马上会多一个不迟到的理由。",
+      "kind": "transition",
+      "claimIds": [],
+      "anchors": []
+    },
+    {
+      "id": "s2",
+      "text": "东岭市轨道交通城西线已经通过了初期运营前安全评估，说白了，就是开通前的安全大考已经过关。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s3",
+      "text": "这条线全长31.4公里，一共设21座车站。",
+      "kind": "fact",
+      "claimIds": [
+        "c1",
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 5,
+          "length": 6,
+          "claimId": "c1"
+        },
+        {
+          "start": 15,
+          "length": 5,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "text": "它会在10月26日开通试运营。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 3,
+          "length": 6,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "text": "云岚快讯从东岭市交通运输局拿到了这条新线的开通方案。",
+      "kind": "fact",
+      "claimIds": [
+        "c6"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s6",
+      "text": "市交通运输局表示，开通初期的行车间隔是六分半钟，也就是两趟车之间隔六分半钟。",
+      "kind": "fact",
+      "claimIds": [
+        "c5"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s7",
+      "text": "这条线串起城西居住区和东部产业园，尤其是城西居住区已经比较成熟。",
+      "kind": "fact",
+      "claimIds": [
+        "c8",
+        "c16"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s8",
+      "text": "北崖观察的记者实地走访了东岭轨道交通城西线沿途的三座车站，其中两座车站的无障碍电梯仍在调试，站务人员称会在开通之前完成。",
+      "kind": "fact",
+      "claimIds": [
+        "c9",
+        "c10",
+        "c11"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s9",
+      "text": "不过，站外的接驳公交线路尚未公布。",
+      "kind": "fact",
+      "claimIds": [
+        "c12"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s10",
+      "text": "鹭岛晚报持续关注东岭的轨道交通建设；而鹭岛的同类线路，开通首年日均客流是九万人次，培育期——也就是客流慢慢养起来的时间——接近两年。",
+      "kind": "fact",
+      "claimIds": [
+        "c13",
+        "c14",
+        "c15"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s11",
+      "text": "所以我觉得，这条线初期可能不会一下子爆满，但底子不差，值得盯一盯。",
+      "kind": "opinion",
+      "claimIds": [],
+      "anchors": []
+    }
+  ],
+  "claims": {
+    "c0": {
+      "id": "c0",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「东岭市轨道交通城西线的初期运营前安全评估已经通过。」",
+          "time": "07:30"
+        }
+      ]
+    },
+    "c1": {
+      "id": "c1",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「城西线全长 31.4 公里。」",
+          "time": "07:30"
+        },
+        {
+          "publisher": "云岚快讯",
+          "note": "「城西线全长 31.4 公里。」",
+          "time": "09:15"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「城西线全长 31.4 公里。」",
+          "time": "11:50"
+        }
+      ]
+    },
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「城西线设 21 座车站。」",
+          "time": "07:30"
+        },
+        {
+          "publisher": "云岚快讯",
+          "note": "「城西线设 21 座车站。」",
+          "time": "09:15"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「城西线设 21 座车站。」",
+          "time": "11:50"
+        }
+      ]
+    },
+    "c3": {
+      "id": "c3",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「城西线将于 10 月 26 日开通试运营。」",
+          "time": "07:30"
+        },
+        {
+          "publisher": "云岚快讯",
+          "note": "「城西线将于 10 月 26 日开通试运营。」",
+          "time": "09:15"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「城西线将于 10 月 26 日开通试运营。」",
+          "time": "11:50"
+        }
+      ]
+    },
+    "c5": {
+      "id": "c5",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "东岭日报",
+          "note": "「市交通运输局表示，开通初期的行车间隔为六分半钟」",
+          "time": "07:30"
+        }
+      ]
+    },
+    "c6": {
+      "id": "c6",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "云岚快讯",
+          "note": "「云岚快讯从东岭市交通运输局拿到了这条新线的开通方案。」",
+          "time": "09:15"
+        }
+      ]
+    },
+    "c8": {
+      "id": "c8",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "云岚快讯",
+          "note": "「这条线串起城西居住区与东部产业园」",
+          "time": "09:15"
+        }
+      ]
+    },
+    "c9": {
+      "id": "c9",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「北崖观察记者实地走访了东岭轨道交通城西线沿途的三座车站。」",
+          "time": "11:50"
+        }
+      ]
+    },
+    "c10": {
+      "id": "c10",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「记者注意到，其中两座车站的无障碍电梯仍在调试」",
+          "time": "11:50"
+        }
+      ]
+    },
+    "c11": {
+      "id": "c11",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「站务人员称会在开通之前完成」",
+          "time": "11:50"
+        }
+      ]
+    },
+    "c12": {
+      "id": "c12",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「站外的接驳公交线路尚未公布。」",
+          "time": "11:50"
+        }
+      ]
+    },
+    "c13": {
+      "id": "c13",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「鹭岛晚报持续关注东岭的轨道交通建设。」",
+          "time": "15:08"
+        }
+      ]
+    },
+    "c14": {
+      "id": "c14",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「鹭岛的同类线路在开通首年的日均客流为九万人次」",
+          "time": "15:08"
+        }
+      ]
+    },
+    "c15": {
+      "id": "c15",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「培育期接近两年」",
+          "time": "15:08"
+        }
+      ]
+    },
+    "c16": {
+      "id": "c16",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「东岭这条新线串联了成熟的城西居住区」",
+          "time": "15:08"
+        }
+      ]
+    }
+  },
+  "recheckResults": null,
+  "stages": [
+    {
+      "name": "抓取原文",
+      "state": "done",
+      "count": "1 篇",
+      "detail": null
+    },
+    {
+      "name": "扩展检索",
+      "state": "done",
+      "count": "4 篇",
+      "detail": null
+    },
+    {
+      "name": "抽取事实点",
+      "state": "done",
+      "count": "30 条",
+      "detail": null
+    },
+    {
+      "name": "归并去重",
+      "state": "done",
+      "count": "17 点 · 4 独立源",
+      "detail": null
+    },
+    {
+      "name": "交叉验证",
+      "state": "done",
+      "count": "3 / 17",
+      "detail": null
+    },
+    {
+      "name": "选点",
+      "state": "done",
+      "count": "4 条",
+      "detail": null
+    },
+    {
+      "name": "成稿",
+      "state": "done",
+      "count": "11 句",
+      "detail": null
+    },
+    {
+      "name": "挂信源",
+      "state": "done",
+      "count": "9 句挂上",
+      "detail": null
+    },
+    {
+      "name": "时长与气口",
+      "state": "done",
+      "count": "70 秒 · 27 个气口",
+      "detail": null
+    }
+  ],
+  "budget": {
+    "used": 28513,
+    "budgeted": 79500,
+    "remainingThisMonth": 3000000,
+    "costCents": 16,
+    "byStage": {
+      "抽取事实点": 9871,
+      "交叉验证": 11362,
+      "成稿": 7280
+    }
+  },
+  "insufficientReason": null
+}
