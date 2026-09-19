@@ -441,12 +441,27 @@ export async function main(argv: string[]): Promise<number> {
     // 每篇一本账：`budget` 是这一篇的花费，不是这一轮的累计。
     const ledger = new TokenLedger();
     const deepseek = new DeepSeekClient(config, ledger);
-    const { brief, stats } = await makeOne(
-      news,
-      livePorts(deepseek),
-      ledger,
-      PLACEHOLDER_MONTHLY_QUOTA - spentTokens,
-    );
+    let result;
+    try {
+      result = await makeOne(
+        news,
+        livePorts(deepseek),
+        ledger,
+        PLACEHOLDER_MONTHLY_QUOTA - spentTokens,
+      );
+    } catch (error) {
+      // 账单先出来，再往上抛。这一篇中途炸了——信源不够、模型回了个空包、
+      // 稿子两次都没过校验——花掉的 token 一样要看得见。`cli.ts` 用一个
+      // finally 守着同一条规矩，这条产线跑一批，更不该让失败那几篇的账
+      // 跟着进程一起消失：这一轮到底花了多少，正是批量跑完最先要问的事。
+      process.stderr.write(
+        `  ✗ ${news.slug} 没跑完，这一篇已经花掉：${JSON.stringify(ledger.totals())}` +
+          ` 约 ¥${(ledger.totalCostCents() / 100).toFixed(2)}\n` +
+          `  之前几篇合计 ¥${(spentCents / 100).toFixed(2)}\n`,
+      );
+      throw error;
+    }
+    const { brief, stats } = result;
 
     spentTokens += stats.usedTokens;
     spentCents += stats.costCents;
