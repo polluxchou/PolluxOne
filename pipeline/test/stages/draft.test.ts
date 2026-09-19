@@ -60,7 +60,11 @@ describe("buildDraftPrompt", () => {
     expect(p).toContain("claimIds");
   });
 
-  it("conflicted 的 claim 不出现在 prompt 里——它根本不该进稿", () => {
+  // 这一条以前测的是「conflicted 被悄悄滤掉」。现在谁进稿只有 ⑥ 一个答案
+  // （run.ts 交进来的就是 selection.picked，里面不可能有 conflicted），
+  // 所以这里从「滤」改成「抛」：真收到 conflicted 说明接线错了，而静默地
+  // 滤掉正是「⑥ 挑了 5 条、⑦ 写了 15 句」那个缺陷能藏这么久的方式。
+  it("conflicted 的 claim 被交进来时抛——不再悄悄滤掉，那会让谁决定进稿有两个答案", () => {
     const withConflict: VerifiedClaim[] = [
       ...claims,
       {
@@ -72,9 +76,18 @@ describe("buildDraftPrompt", () => {
         conflictsWith: ["c8"],
       },
     ];
-    const p = buildDraftPrompt(withConflict, 60, 0);
-    expect(p).not.toContain("c9");
-    expect(p).not.toContain("23 亿美元");
+    expect(() => buildDraftPrompt(withConflict, 60, 0)).toThrow(/c9/);
+    expect(() => buildDraftPrompt(withConflict, 60, 0)).toThrow(/conflicted/);
+  });
+
+  it("交进来几条就写几条——这里不再自己挑，挑是 ⑥ 的事", () => {
+    const p = buildDraftPrompt([claims[1]!], 60, 0);
+    const list = p.slice(p.indexOf("可用的事实："));
+    expect(list).toContain("c1");
+    // c0 是 strong、也不冲突，只是没被交进来——就不该出现在可用列表里。
+    // （"c0" 在输出格式那一行的示例里有，所以只看列表那一段。）
+    expect(list).not.toContain("c0");
+    expect(p).not.toContain("存款准备金率下调 0.5 个百分点");
   });
 
   it("没有可用 claim 时抛——空稿子不如不出稿", () => {

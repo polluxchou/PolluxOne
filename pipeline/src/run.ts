@@ -160,7 +160,19 @@ export async function runPipeline(
 
   // ⑦ 成稿——唯一一步「前面都成立才值得花」的调用。
   // ⑦ 除了这些 claim 之外不许看到任何别的东西。
-  const draft = await ports.draftScript(checked.claims, options.durationSec, options.register);
+  //
+  // 交给它的是 **⑥ 挑出来的那几条**，不是全部非 conflicted 的。⑥ 的产物以前
+  // 只用来判「敢不敢播」，挑完就扔了：气候那篇 picked 是 5 条，成稿却拿到了
+  // 全部 14 条、写了 15 句——iOS 阶段条上「选点 5 条」对「成稿 15 句」对不上，
+  // 不是数错了，是这一步的结果没传下去。
+  //
+  // 顺序用 picked 的顺序，不用 claims 的：`Selection.picked` 是「已按呈现顺序
+  // 排好」的（strong 在前、同分按独立源数降序），那是 ⑥ 的编辑判断，
+  // claims 的下标顺序只是归并的副产物。
+  const byId = new Map(checked.claims.map((c) => [c.id, c]));
+  // picked 里的 id 全部来自 checked.claims，get 不会落空。
+  const picked = checked.selection.picked.map((id) => byId.get(id)!);
+  const draft = await ports.draftScript(picked, options.durationSec, options.register);
 
   // 最后一遍带上稿子：⑧ 的挂信源要拿 draft 才做得了。冲突图要跟着一起带，
   // 否则最终结果里那几条语义矛盾的 claim 会重新变回 strong。

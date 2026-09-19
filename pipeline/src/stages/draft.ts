@@ -17,18 +17,35 @@ export function registerLabel(register: number): string {
   return REGISTER_LABELS[idx]!;
 }
 
+/**
+ * ⑦ 成稿的 prompt。
+ *
+ * **传进来的就是要写进稿子的那几条**——⑥ 的 `Selection.picked`，由
+ * `run.ts` 取好、按呈现顺序排好。这里不再自己筛一遍。
+ *
+ * 以前这里会把 conflicted 的静默滤掉。滤掉本身没错，错在它让「谁决定进稿」
+ * 有了两个答案：⑥ 按名额和独立源数挑，这里按 confidence 滤，两个答案不一致
+ * 时谁说了算没人知道——而它们确实不一致过，⑥ 挑 5 条、⑦ 写了 15 句就是那样
+ * 来的。现在只有一个答案（⑥），于是这里的 conflicted 检查从「悄悄扔掉」改成
+ * 「响一声」：真走到这一步说明接线错了，而静默正是上一个缺陷藏起来的方式。
+ */
 export function buildDraftPrompt(
   claims: VerifiedClaim[],
   durationSec: number,
   register: number,
 ): string {
-  // conflicted 的不进 prompt：让模型看见它，就等于给它一个用上的机会。
-  const usable = claims.filter((c) => c.confidence !== "conflicted");
-  if (usable.length === 0) {
+  const conflicted = claims.filter((c) => c.confidence === "conflicted");
+  if (conflicted.length > 0) {
+    throw new Error(
+      `conflicted 的 claim 不该被交到成稿这一步：${conflicted.map((c) => c.id).join("、")}` +
+        "——⑥ 的 selection.picked 里不会有它们，调用方给错了",
+    );
+  }
+  if (claims.length === 0) {
     throw new Error("没有可用的 claim，不应该走到成稿这一步——上层该出「不建议播」");
   }
 
-  const list = usable
+  const list = claims
     .map((c) => `- ${c.id}（${c.independence} 个独立信源）：${c.text}`)
     .join("\n");
 

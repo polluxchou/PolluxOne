@@ -211,8 +211,8 @@ describe("runPipeline", () => {
         Promise.resolve([[claims[0]!.id, claims[1]!.id]]),
       );
 
-    // ⑦ 拿到的是全部 claim，由它自己（cli.ts 里的 allowed）挑掉 conflicted 的。
-    // 这里记下它看到的那一份，用来确认标记发生在成稿**之前**。
+    // ⑦ 拿到的是 ⑥ 挑出来的那几条，里面不会有 conflicted。这里记下它看到的
+    // 那一份，用来确认判冲突发生在成稿**之前**。
     const seenByDraft: { id: string; confidence: string }[] = [];
     const draftScript = vi
       .fn()
@@ -220,9 +220,7 @@ describe("runPipeline", () => {
         seenByDraft.push(...claims);
         return Promise.resolve([
           { text: "先说一句钩子。", kind: "transition", claimIds: [] },
-          ...claims
-            .filter((c) => c.confidence !== "conflicted")
-            .map((c) => ({ text: `${c.id} 的事实句。`, kind: "fact", claimIds: [c.id] })),
+          ...claims.map((c) => ({ text: `${c.id} 的事实句。`, kind: "fact", claimIds: [c.id] })),
         ]);
       });
 
@@ -248,10 +246,48 @@ describe("runPipeline", () => {
     expect(conflicted[0]!.conflictsWith).toEqual([conflicted[1]!.id]);
     expect(conflicted[1]!.conflictsWith).toEqual([conflicted[0]!.id]);
 
-    // 成稿拿到的那一份必须已经标好：⑦ 若看到的是判冲突之前的 claims，
-    // 打架的两条会一起写进稿子，这一层就等于没做。
-    expect(seenByDraft.filter((c) => c.confidence === "conflicted")).toHaveLength(2);
+    // 成稿必须在判冲突**之后**才拿到 claims：⑦ 若看到的是判冲突之前的那一份，
+    // 打架的两条会一起写进稿子，这一层就等于没做。以前是把全部 claim（含标成
+    // conflicted 的）交给 ⑦，靠它自己挑；现在交的是 ⑥ 挑完的 picked，所以
+    // 「标好了」体现为**它一条 conflicted 都看不到**。
+    expect(seenByDraft.filter((c) => c.confidence === "conflicted")).toHaveLength(0);
+    expect(seenByDraft.map((c) => c.id)).toEqual(result.core.selection.picked);
     expect(result.core.bind.ok).toBe(true);
+  });
+
+  it("成稿拿到的就是 ⑥ 挑出来的那几条，不是全部非 conflicted 的", async () => {
+    // 实跑证据：气候那篇 picked 是 5 条，成稿却拿到全部 14 条、写了 15 句——
+    // iOS 阶段条上「选点 5 条」对「成稿 15 句」对不上，是 ⑥ 的产物被扔了。
+    // 这里 60 秒 → factSlots 是 3，而 claim 有 5 条，名额比 claim 少，
+    // 「交的是 picked」和「交的是全部」才区分得开。
+    const seenByDraft: string[] = [];
+    const draftScript = vi.fn().mockImplementation((claims: { id: string }[]) => {
+      seenByDraft.push(...claims.map((c) => c.id));
+      return Promise.resolve([
+        { text: "先说一句钩子。", kind: "transition", claimIds: [] },
+        ...claims.map((c) => ({ text: `${c.id} 的事实句。`, kind: "fact", claimIds: [c.id] })),
+      ]);
+    });
+
+    const result = await runPipeline(
+      "https://a.com/1",
+      OPTIONS,
+      ports({
+        readArticle: threeOutlets(fiveBody),
+        findSources: vi.fn().mockResolvedValue(["https://b.com/1", "https://c.com/1"]),
+        extractFacts: vi.fn().mockImplementation(fiveFacts),
+        draftScript,
+      }),
+    );
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+
+    const picked = result.core.selection.picked;
+    expect(picked).toHaveLength(result.core.estimate.factSlots);
+    expect(picked.length).toBeLessThan(result.core.claims.length);
+    // 顺序也照 picked 的来：那是 ⑥ 排好的呈现顺序，不是归并的下标顺序。
+    expect(seenByDraft).toEqual(picked);
   });
 
   it("语义冲突把最后几条 strong 打掉时，最贵的那一步照样不花", async () => {
