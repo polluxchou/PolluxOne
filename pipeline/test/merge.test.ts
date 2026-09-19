@@ -11,6 +11,55 @@ test("the signature carries each number together with its unit, sorted", () => {
     .toEqual(["0.5个百", "15日生", "1万亿", "3月"]);
 });
 
+test("a trailing period does not change the signature", () => {
+  // 实跑现场：单字量词后面的句号被吃进签名，同一句话的两种抄写就此分家。
+  expect(numericSignature("起步价 2 元。")).toEqual(numericSignature("起步价 2 元"));
+  expect(numericSignature("起步价 2 元。")).toEqual(["2元"]);
+});
+
+test("the three facts that really blew up the sports brief keep clean signatures", () => {
+  // 这三条在真跑时全被判成 conflicted，strong 归零，稿子写不出来。
+  expect(numericSignature("合同期为 5 年。")).toEqual(["5年"]);
+  expect(numericSignature("打进 24 球。")).toEqual(["24球"]);
+  expect(numericSignature("11 月 3 日。")).toEqual(["11月", "3日"]);
+});
+
+test("every flavour of punctuation stops the unit, not just the period", () => {
+  for (const tail of ["。", "，", "、", "；", "：", "！", "？", "）", "】", "」", "』",
+                      "·", "—", "…", "”", "’", ".", ",", ";", ":", "!", "?", ")", "\"", "'"]) {
+    expect(numericSignature(`合同期为 5 年${tail}`)).toEqual(["5年"]);
+  }
+});
+
+test("two-character units were never affected and still are not", () => {
+  expect(numericSignature("营收 48.6 亿元。")).toEqual(["48.6亿元"]);
+  expect(numericSignature("全长 31.4 公里。")).toEqual(["31.4公里"]);
+  expect(numericSignature("身价 2800 万欧。")).toEqual(["2800万欧"]);
+});
+
+test("decimals and percent signs survive the punctuation fix", () => {
+  expect(numericSignature("同比增长 45%。")).toEqual(numericSignature("同比增长 45%"));
+  expect(numericSignature("同比增长 45%。")).toEqual(["45%"]);
+  expect(numericSignature("下降 0.5%。")).toEqual(["0.5%"]);
+});
+
+test("the fix does NOT over-merge: different numbers and different units stay apart", () => {
+  // 排除得太多的反向：签名撞车 = 过度归并 = 一条没人证实的说法搭上别人的信源。
+  expect(numericSignature("起步价 2 元")).not.toEqual(numericSignature("起步价 3 元"));
+  expect(numericSignature("起步价 2 元")).not.toEqual(numericSignature("起步价 2 米"));
+  // 量纲本身不能被当成标点丢掉，否则「45%」和「45」会撞成一条。
+  expect(numericSignature("同比增长 45%")).not.toEqual(numericSignature("同比增长 45"));
+  expect(numericSignature("2 元。")).not.toEqual(numericSignature("2。"));
+});
+
+test("a single trailing period no longer splits one fact into two claims", () => {
+  const facts = [
+    fact("f0", "s0", "网约车起步价为 2 元"),
+    fact("f1", "s1", "网约车起步价为 2 元。"),
+  ];
+  expect(mergeFacts(facts)).toHaveLength(1);
+});
+
 test("numeric signature is empty when there are no numbers", () => {
   expect(numericSignature("央行今天突然出手了")).toEqual([]);
 });
