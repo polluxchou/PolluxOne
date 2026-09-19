@@ -243,8 +243,13 @@ async function makeOne(
     throw new Error(`${news.slug}: 语义冲突之后 strong 不够了，不出稿`);
   }
 
-  // ⑦ 成稿
-  const drafted = await ports.draftScript(checked.claims, news.durationSec, news.register);
+  // ⑦ 成稿。喂给它的是 ⑥ 挑出来的那几条，不是全部非 conflicted 的——
+  // 后者正是「选点 5 条、成稿 15 句」那个对不上的来源：谁决定进稿有过两个
+  // 答案。现在唯一答案是 ⑥，而 buildDraftPrompt 收到 conflicted 会直接抛。
+  const picked = checked.selection.picked
+    .map((id) => checked.claims.find((c) => c.id === id))
+    .filter((c): c is NonNullable<typeof c> => c !== undefined);
+  const drafted = await ports.draftScript(picked, news.durationSec, news.register);
 
   // 最后一遍带上稿子：⑧ 的挂信源要拿 draft 才做得了。
   const core = buildBrief({ ...base, draft: drafted.sentences, externalConflicts });
