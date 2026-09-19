@@ -1,12 +1,28 @@
 import SwiftUI
 
 extension SentenceAccent {
+    /// 句子左边那条线的颜色。neutral 是一条**深色细线**，它只在这个位置成立。
     var color: Color {
         switch self {
         case .strong: Color(red: 0.435, green: 0.635, blue: 0.573)   // #6FA292
         case .weak:   Color(red: 0.851, green: 0.643, blue: 0.255)   // #D9A441
         case .neutral: Color(red: 0.227, green: 0.212, blue: 0.184)  // #3A362F
         }
+    }
+
+    /// 同一个语义用作**文字**时的颜色。
+    ///
+    /// 和 `color` 分开，是因为 neutral 的 #3A362F 是画线用的深色——拿它写字，
+    /// 字和底几乎分不开，那个数字就是读不出来。strong / weak 是中间调，
+    /// 当线当字都成立，所以只有 neutral 需要换。
+    var labelColor: Color {
+        self == .neutral ? .secondary : color
+    }
+
+    /// 文字底衬。neutral 用中性材质而不是自身的 13% —— 深色的 13% 在深底上
+    /// 等于没有，在浅底上又会糊成一团。
+    var labelBackground: Color {
+        self == .neutral ? Color(.tertiarySystemFill) : color.opacity(0.13)
     }
 }
 
@@ -107,7 +123,9 @@ struct SentenceRow: View {
                     .font(.system(size: 11, weight: .bold))
                 Text(label.text).font(.system(size: 11.5, design: .monospaced))
             }
-            .foregroundStyle(style.accent.color)
+            // 今天这里只会是 strong / weak（有 claim 才画得出来），
+            // 但用 labelColor 是为了将来条件放宽时不会悄悄变成读不出的字。
+            .foregroundStyle(style.accent.labelColor)
         }
     }
 }

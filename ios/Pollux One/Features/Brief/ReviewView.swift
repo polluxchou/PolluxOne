@@ -126,8 +126,8 @@ struct CountPill: View {
         Text("\(value)")
             .font(.system(size: 11.5, design: .monospaced))
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(accent.color.opacity(0.13), in: Capsule())
-            .foregroundStyle(accent.color)
+            .background(accent.labelBackground, in: Capsule())
+            .foregroundStyle(accent.labelColor)
     }
 }
 
