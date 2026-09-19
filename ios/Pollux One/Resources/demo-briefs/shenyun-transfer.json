@@ -1,0 +1,402 @@
+{
+  "id": "b-demo-shenyun-transfer",
+  "news": {
+    "publisher": "青洲体育报",
+    "title": "沈昀将加盟鹭岛海燕，签下五年合同，体检定于 11 月 3 日",
+    "url": "https://example.com/qingzhou-sports/2026/shenyun-to-ludao"
+  },
+  "status": "ready",
+  "estimatedSeconds": 54,
+  "pacedToUser": false,
+  "sentences": [
+    {
+      "id": "s1",
+      "text": "这笔交易，可能比你想的还要大。",
+      "kind": "transition",
+      "claimIds": [],
+      "anchors": []
+    },
+    {
+      "id": "s2",
+      "text": "沈昀将转会至鹭岛海燕俱乐部，双方谈判持续了将近两个月，签下了一份5年合同。",
+      "kind": "fact",
+      "claimIds": [
+        "c0",
+        "c1",
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 32,
+          "length": 2,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "text": "沈昀上赛季在联赛打进24粒进球，球员本人已经同意个人条款。",
+      "kind": "fact",
+      "claimIds": [
+        "c3",
+        "c10"
+      ],
+      "anchors": [
+        {
+          "start": 10,
+          "length": 2,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "text": "北崖观察从鹭岛海燕俱乐部的内部人士处核实了这笔转会的几个关键条款，合同另附带一个赛季的续约选项，也就是说，到期后可以选择再续一年。",
+      "kind": "fact",
+      "claimIds": [
+        "c8",
+        "c9"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s5",
+      "text": "体检安排在11月3日下午，据本报了解，官宣会在体检结束之后进行。",
+      "kind": "fact",
+      "claimIds": [
+        "c4",
+        "c6"
+      ],
+      "anchors": [
+        {
+          "start": 5,
+          "length": 5,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "text": "今天鹭岛晚报记者在训练基地外看到，沈昀的行李已经运抵，球迷在门口聚集。",
+      "kind": "fact",
+      "claimIds": [
+        "c12",
+        "c13",
+        "c14"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s7",
+      "text": "关于费用，对方不愿多谈；本报记者就转会费一事向俱乐部求证，对方以商业保密为由未予置评，只说一切以官方公告为准。",
+      "kind": "fact",
+      "claimIds": [
+        "c11",
+        "c15",
+        "c16",
+        "c17"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s8",
+      "text": "从现有信息看，这笔引援对海燕的进攻线是个明显补强。",
+      "kind": "opinion",
+      "claimIds": [],
+      "anchors": []
+    }
+  ],
+  "claims": {
+    "c0": {
+      "id": "c0",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「前锋沈昀将转会至鹭岛海燕俱乐部」",
+          "time": "19:05"
+        }
+      ]
+    },
+    "c1": {
+      "id": "c1",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「双方的谈判持续了将近两个月。」",
+          "time": "19:05"
+        }
+      ]
+    },
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「沈昀与鹭岛海燕签下一份 5 年合同。」",
+          "time": "19:05"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「沈昀与鹭岛海燕签下一份 5 年合同。」",
+          "time": "20:18"
+        },
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「沈昀与鹭岛海燕签下一份 5 年合同」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c3": {
+      "id": "c3",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「沈昀上赛季在联赛打进 24 粒进球。」",
+          "time": "19:05"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「沈昀上赛季在联赛打进 24 粒进球。」",
+          "time": "20:18"
+        },
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「沈昀上赛季在联赛打进 24 粒进球」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c4": {
+      "id": "c4",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「体检安排在 11 月 3 日下午。」",
+          "time": "19:05"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「体检安排在 11 月 3 日下午。」",
+          "time": "20:18"
+        },
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「体检安排在 11 月 3 日下午」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c6": {
+      "id": "c6",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「据本报了解，官宣会在体检结束之后进行」",
+          "time": "19:05"
+        }
+      ]
+    },
+    "c8": {
+      "id": "c8",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「北崖观察从鹭岛海燕俱乐部的内部人士处核实了这笔转会的几个关键条款。」",
+          "time": "20:18"
+        }
+      ]
+    },
+    "c9": {
+      "id": "c9",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「合同另附带一个赛季的续约选项」",
+          "time": "20:18"
+        }
+      ]
+    },
+    "c10": {
+      "id": "c10",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「球员本人已经同意个人条款」",
+          "time": "20:18"
+        }
+      ]
+    },
+    "c11": {
+      "id": "c11",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "北崖观察",
+          "note": "「关于费用，对方不愿多谈」",
+          "time": "20:18"
+        }
+      ]
+    },
+    "c12": {
+      "id": "c12",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「鹭岛晚报记者今天在训练基地外看到」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c13": {
+      "id": "c13",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「沈昀的行李已经运抵」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c14": {
+      "id": "c14",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「球迷在门口聚集」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c15": {
+      "id": "c15",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「本报记者就转会费一事向俱乐部求证」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c16": {
+      "id": "c16",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「对方以商业保密为由未予置评」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c17": {
+      "id": "c17",
+      "independence": 1,
+      "mergedAwayCount": 0,
+      "sources": [
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「只说一切以官方公告为准」",
+          "time": "21:40"
+        }
+      ]
+    }
+  },
+  "recheckResults": null,
+  "stages": [
+    {
+      "name": "抓取原文",
+      "state": "done",
+      "count": "1 篇",
+      "detail": null
+    },
+    {
+      "name": "扩展检索",
+      "state": "done",
+      "count": "4 篇",
+      "detail": null
+    },
+    {
+      "name": "抽取事实点",
+      "state": "done",
+      "count": "38 条",
+      "detail": null
+    },
+    {
+      "name": "归并去重",
+      "state": "done",
+      "count": "25 点 · 4 独立源",
+      "detail": null
+    },
+    {
+      "name": "交叉验证",
+      "state": "done",
+      "count": "3 / 25",
+      "detail": null
+    },
+    {
+      "name": "选点",
+      "state": "done",
+      "count": "3 条",
+      "detail": null
+    },
+    {
+      "name": "成稿",
+      "state": "done",
+      "count": "8 句",
+      "detail": null
+    },
+    {
+      "name": "挂信源",
+      "state": "done",
+      "count": "6 句挂上",
+      "detail": null
+    },
+    {
+      "name": "时长与气口",
+      "state": "done",
+      "count": "54 秒 · 24 个气口",
+      "detail": null
+    }
+  ],
+  "budget": {
+    "used": 39429,
+    "budgeted": 65000,
+    "remainingThisMonth": 2964344,
+    "costCents": 16,
+    "byStage": {
+      "抽取事实点": 16690,
+      "交叉验证": 18074,
+      "成稿": 4665
+    }
+  },
+  "insufficientReason": null
+}
