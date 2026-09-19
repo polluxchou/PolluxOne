@@ -1,6 +1,12 @@
 // pipeline/test/models/deepseek.test.ts
 import { describe, expect, it, vi } from "vitest";
-import { DeepSeekClient, extractUsage } from "../../src/models/deepseek.js";
+import {
+  DeepSeekClient,
+  DEFAULT_MAX_TOKENS,
+  extractUsage,
+  isTruncated,
+  TruncatedOutputError,
+} from "../../src/models/deepseek.js";
 import { TokenLedger } from "../../src/models/ledger.js";
 
 const reply = (content: string, usage = { prompt_tokens: 10, completion_tokens: 5 }) =>
@@ -8,6 +14,35 @@ const reply = (content: string, usage = { prompt_tokens: 10, completion_tokens: 
     JSON.stringify({ choices: [{ message: { content } }], usage }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
+
+/**
+ * 实跑里那个静默的钱漏长这样：HTTP 200、finish_reason=length、推理把上限顶满、
+ * content 是空字符串。三件事同时发生，没有一件会自己喊出来。
+ */
+const truncated = (maxTokens = DEFAULT_MAX_TOKENS) =>
+  new Response(
+    JSON.stringify({
+      choices: [{ message: { content: "" }, finish_reason: "length" }],
+      usage: {
+        prompt_tokens: 4321,
+        completion_tokens: maxTokens,
+        completion_tokens_details: { reasoning_tokens: maxTokens },
+      },
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+
+const clientWith = (send: unknown, ledger = new TokenLedger()) =>
+  new DeepSeekClient(
+    { apiKey: "k", baseUrl: "https://api.deepseek.com" },
+    ledger,
+    send as never,
+  );
+
+const bodyOf = (send: { mock: { calls: unknown[][] } }, call = 0) =>
+  JSON.parse((send.mock.calls[call]![1] as RequestInit).body as string) as {
+    max_tokens: number;
+  };
 
 describe("extractUsage", () => {
   it("映射 DeepSeek 的字段名", () => {
@@ -133,5 +168,85 @@ describe("DeepSeekClient.json", () => {
     await client.json("extract", "deepseek-flash", "p");
     const body = JSON.parse((send.mock.calls[0]![1] as RequestInit).body as string);
     expect(body.response_format).toEqual({ type: "json_object" });
+  });
+});
+
+describe("max_tokens 截断", () => {
+  it("finish_reason 是 length 时说出「被截断」，而不是那条后面跟着空字符串的「没有返回合法 JSON」", async () => {
+    const send = vi.fn().mockResolvedValue(truncated());
+    const error = (await clientWith(send)
+      .json("conflict", "deepseek-flash", "p")
+      .catch((e: unknown) => e)) as Error;
+
+    expect(error).toBeInstanceOf(TruncatedOutputError);
+    expect(error.message).toMatch(/截断/);
+    // 这条正是实跑里白烧 24000 token 的那句：看不出被截断了，只看见一片空白。
+    expect(error.message).not.toMatch(/没有返回合法 JSON/);
+  });
+
+  it("错误里带上上限、实际 completion_tokens 和 reasoning_tokens——不带就等于还得再猜一轮", async () => {
+    const send = vi.fn().mockResolvedValue(truncated(8000));
+    const error = (await clientWith(send)
+      .json("conflict", "deepseek-flash", "p", 8000)
+      .catch((e: unknown) => e)) as TruncatedOutputError;
+
+    expect(error.maxTokens).toBe(8000);
+    expect(error.completionTokens).toBe(8000);
+    expect(error.reasoningTokens).toBe(8000);
+    expect(error.message).toContain("8000");
+    expect(error.message).toContain("deepseek-flash");
+  });
+
+  it("截断照样记账——这 8000 个输出 token 是真付了钱的", async () => {
+    const ledger = new TokenLedger();
+    const send = vi.fn().mockResolvedValue(truncated(8000));
+    await clientWith(send, ledger).json("conflict", "deepseek-flash", "p", 8000).catch(() => undefined);
+
+    expect(ledger.totals().outputTokens).toBe(8000);
+    expect(ledger.totals().inputTokens).toBe(4321);
+  });
+
+  it("截断能和「输出不合规」分开：前者重试必然重演，后者重试有意义", async () => {
+    const truncatedError = await clientWith(vi.fn().mockResolvedValue(truncated()))
+      .json("draft", "deepseek-v4-pro", "p")
+      .catch((e: unknown) => e);
+    const malformedError = await clientWith(vi.fn().mockResolvedValue(reply("这不是 JSON")))
+      .json("draft", "deepseek-v4-pro", "p")
+      .catch((e: unknown) => e);
+
+    expect(isTruncated(truncatedError)).toBe(true);
+    expect(isTruncated(malformedError)).toBe(false);
+    // 两个都是 Error，靠文案区分是不可靠的，所以调用方问的是类型。
+    expect(malformedError).toBeInstanceOf(Error);
+  });
+
+  it("finish_reason 是 stop 就照常解析，别把正常回复也当截断", async () => {
+    const send = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"ok":true}' }, finish_reason: "stop" }],
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    await expect(clientWith(send).json("extract", "deepseek-flash", "p")).resolves.toEqual({
+      ok: true,
+    });
+  });
+
+  it("默认上限够推理模型用——8000 被实跑证明太小了", async () => {
+    const send = vi.fn().mockResolvedValue(reply("{}"));
+    await clientWith(send).json("extract", "deepseek-flash", "p");
+
+    expect(bodyOf(send).max_tokens).toBe(DEFAULT_MAX_TOKENS);
+    expect(DEFAULT_MAX_TOKENS).toBeGreaterThan(8000);
+  });
+
+  it("显式给的上限压过默认值", async () => {
+    const send = vi.fn().mockResolvedValue(reply("{}"));
+    await clientWith(send).json("conflict", "deepseek-flash", "p", 12_345);
+
+    expect(bodyOf(send).max_tokens).toBe(12_345);
   });
 });

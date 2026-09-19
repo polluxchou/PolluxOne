@@ -4,7 +4,7 @@ import { loadConfig, type Config } from "./config/env.js";
 import { buildBrief, type CoreInput } from "./core.js";
 import { findNumericConflicts } from "./dedupe/conflict.js";
 import { DEFAULT_CHARS_PER_SECOND } from "./domain/prosody.js";
-import { DeepSeekClient } from "./models/deepseek.js";
+import { DeepSeekClient, DEFAULT_MAX_TOKENS, type Sender } from "./models/deepseek.js";
 import { TokenLedger } from "./models/ledger.js";
 import { ZhipuSearchClient } from "./models/zhipu-search.js";
 import { readArticle } from "./net/jina.js";
@@ -109,6 +109,16 @@ const CONFLICT_MODEL = "deepseek-flash";
 const DRAFT_MODEL = "deepseek-v4-pro";
 
 /**
+ * 三处调用各自的输出上限。`max_tokens` 管的是推理+正文的总和，而且是**上限
+ * 不是预约**——没生成的部分不收钱。所以每一处都按最坏情况给，不按平均给：
+ * 给窄了要赔上整整一次调用的钱，给宽了什么都不赔。
+ */
+const EXTRACT_MAX_TOKENS = DEFAULT_MAX_TOKENS; // 输入一篇报道，输出十几条 fact，默认够
+/** ⑤ 的待判对数随 claim 数**平方**增长（18 条 claim = 152 对），推理和回包一起涨，给双倍。 */
+const CONFLICT_MAX_TOKENS = 2 * DEFAULT_MAX_TOKENS;
+const DRAFT_MAX_TOKENS = DEFAULT_MAX_TOKENS; // 几百字正文 + 推理，默认够
+
+/**
  * `.env.local` 就在这个文件的上一层，**按模块位置解析而不是按 cwd**：
  * `loadConfig` 的默认值 "pipeline/.env.local" 只在仓库根目录下成立，
  * 而 `npm run brief` 的 cwd 恰恰是 pipeline/。
@@ -119,13 +129,14 @@ const ENV_PATH = fileURLToPath(new URL("../.env.local", import.meta.url));
  * 把真实的网络和模型装进 `Ports`。**只有这个函数知道有网络这回事**——
  * `run.ts` 从头到尾一次请求都不发，所以它的测试才能全程离线。
  */
-export function livePorts(config: Config, ledger: TokenLedger): Ports {
-  const deepseek = new DeepSeekClient(config.deepseek, ledger);
+export function livePorts(config: Config, ledger: TokenLedger, send?: Sender): Ports {
+  // send 只为测试存在：不传就是真 fetch，这个文件仍然是唯一知道有网络的地方。
+  const deepseek = new DeepSeekClient(config.deepseek, ledger, send);
   const search = new ZhipuSearchClient(config.zhipu.apiKey, ledger);
 
   const draftOnce = async (prompt: string, allowed: Set<string>) =>
     validateDraft(
-      await deepseek.json<{ sentences?: unknown }>("draft", DRAFT_MODEL, prompt),
+      await deepseek.json<{ sentences?: unknown }>("draft", DRAFT_MODEL, prompt, DRAFT_MAX_TOKENS),
       allowed,
     );
 
@@ -136,7 +147,12 @@ export function livePorts(config: Config, ledger: TokenLedger): Ports {
     extractFacts: async (source) =>
       parseExtractReply(
         source,
-        await deepseek.json<ExtractReply>("extract", EXTRACT_MODEL, buildExtractPrompt(source)),
+        await deepseek.json<ExtractReply>(
+          "extract",
+          EXTRACT_MODEL,
+          buildExtractPrompt(source),
+          EXTRACT_MAX_TOKENS,
+        ),
       ),
 
     findSemanticConflicts: async (claims) => {
@@ -150,6 +166,7 @@ export function livePorts(config: Config, ledger: TokenLedger): Ports {
         "conflict",
         CONFLICT_MODEL,
         buildConflictPrompt(claims, pairs),
+        CONFLICT_MAX_TOKENS,
       );
       return parseConflictReply(reply, new Set(claims.map((c) => c.id)));
     },
@@ -159,6 +176,12 @@ export function livePorts(config: Config, ledger: TokenLedger): Ports {
       // conflicted 的 claim 既没进 prompt，也不许出现在稿子里。
       const allowed = new Set(claims.filter((c) => c.confidence !== "conflicted").map((c) => c.id));
 
+      // 下面这条「拒收+重跑」只对**输出不合规**成立：校验器返回 problems，
+      // 说清哪句不合规再跑一遍，确实可能就对了。
+      //
+      // 被 max_tokens 截断不属于这一类，所以它走的是另一条路：`draftOnce` 里
+      // 抛出的 TruncatedOutputError 从这里直接穿出去，一次都不重跑。同样的
+      // prompt 配同样的上限，重跑必然同样截断，而每一次截断都真付钱。
       const first = await draftOnce(prompt, allowed);
       if (first.ok) return first.sentences;
 
