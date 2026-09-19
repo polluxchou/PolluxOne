@@ -34,15 +34,22 @@ const NUMBER_WITH_UNIT = /(\d+(?:\.\d+)?)\s*((?:[%‰]|[^\d\s\p{P}]){0,2})/gu;
  * 检测之前就消失了**。数字不同本来指望 ⑤ 去判冲突，可这一类 gate 压根
  * 不触发，所以补在这里，不能推给下一个计划。
  *
+ * 取签名之前先 `NFKC`：`\d` 只认 ASCII 数字，中文媒体用全角数字不罕见。
+ * 不折叠的话「涉及金额约 ２３ 亿美元」的签名是空的，于是它和「约 23 亿美元」
+ * 不归并（签名不等），和「约 31 亿美元」也不报冲突（空集是任何集合的子
+ * 多重集）——**一个真的数字分歧就这么无声无息地播出去了**。`shingle.normalize`
+ * 早就在做 NFKC，但那只作用在文本指纹上，数字这一路一直是漏的。
+ *
  * 只吃两个字符是刻意的：「亿美」「亿欧」已经足够区分，再多吃会把
  * 「日起生效」这类行文差异也算进签名，让同一事实的两种措辞不归并。
- * 少归并是安全方向（claim 显得信源更少、被标 weak），多归并不是。
  *
- * 仍然不做单位换算或归一化：「1.50」≠「1.5」、「5%」≠「5 个百分点」，
- * 这些都是漏归并，朝安全方向。
+ * 仍然不做单位换算或数值归一：「1.50」≠「1.5」、「5%」≠「5 个百分点」。
+ * 这些都是漏归并——见下面 `mergeFacts` 上方对漏归并真实代价的说明。
  */
 export function numericSignature(text: string): string[] {
-  return [...text.matchAll(NUMBER_WITH_UNIT)].map((m) => m[1]! + (m[2] ?? "")).sort();
+  return [...text.normalize("NFKC").matchAll(NUMBER_WITH_UNIT)]
+    .map((m) => m[1]! + (m[2] ?? ""))
+    .sort();
 }
 
 function sameNumbers(a: string[], b: string[]): boolean {
@@ -52,6 +59,23 @@ function sameNumbers(a: string[], b: string[]): boolean {
 /**
  * ④ 归并：说同一件事的 Fact 合成一个 Claim。
  * 返回 MergedClaim——independence 和 confidence 是 ⑤ 的事，这里连字段都没有。
+ *
+ * ## 漏归并到底是不是「安全方向」
+ *
+ * 这里曾经写着「少归并是安全方向」。那句话只在 ④ 自己的范围内成立，看**整条
+ * 流水线**就不成立了，因为漏归并的产物会原样流进 ⑤ 的判决：
+ *
+ * 1. 在 ④ 内：漏归并只是让一条事实拆成两条 claim，各自分走一部分信源，
+ *    双双可能掉到 `STRONG_INDEPENDENCE` 以下被标 weak。信息没丢，只是变弱。
+ * 2. 到了 ⑤：这两条 claim 文本几乎相同，会直接撞上 `findNumericConflicts`。
+ *    判据要是看「④ 的签名相不相等」，那么**每一次 ④ 眼里无害的漏归并，
+ *    到 ⑤ 都变成一次有害的误判冲突**——两条同义的话被双双判 conflicted
+ *    踢出稿子，`MINIMUM_STRONG_CLAIMS` 一翻，整篇「不建议播」。
+ *
+ * 所以 ⑤ 现在不看签名，改比 `quantities()`（见 `conflict.ts`）：数值归一、
+ * 量纲归一、行文进不来。有了这道隔离，行文差异造成的漏归并才**真的**只剩
+ * 第 1 条的代价。**过度归并仍然没有任何下游能救**——一个数字在 ④ 里被并掉，
+ * ⑤ 连见都见不到它。所以签名这一侧继续偏保守，一字不差才合并。
  */
 export function mergeFacts(facts: Fact[]): MergedClaim[] {
   const uf = createUnionFind(facts.length);

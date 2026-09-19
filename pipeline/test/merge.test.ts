@@ -153,3 +153,39 @@ test("a merged claim keeps the longest wording", () => {
   ];
   expect(mergeFacts(facts)[0]!.text).toBe("此次降准将释放长期资金约 1 万亿元");
 });
+
+test("full-width digits reach the signature instead of being skipped", () => {
+  // `\d` 只认 ASCII。不做 NFKC 的话「约 ２３ 亿美元」的签名是**空的**，
+  // 于是它既不和「约 23 亿美元」归并（签名不等），也不和「约 31 亿美元」
+  // 报冲突（空集是任何集合的子多重集）—— 一个真的数字分歧无声无息地播出去。
+  // `shingle.normalize` 一直在做 NFKC，但那只作用在文本指纹上。
+  expect(numericSignature("涉及金额约 ２３ 亿美元")).toEqual(["23亿美"]);
+  expect(numericSignature("同比增长 ４５％")).toEqual(["45%"]);
+  expect(numericSignature("起步价 ２ 元。")).toEqual(["2元"]);
+});
+
+test("NFKC does not change any half-width signature", () => {
+  // 反向：归一化只该把全角折成半角，不该动别的。
+  expect(numericSignature("降准 0.5 个百分点，释放 1 万亿元，3 月 15 日生效"))
+    .toEqual(["0.5个百", "15日生", "1万亿", "3月"]);
+  expect(numericSignature("营收 48.6 亿元。")).toEqual(["48.6亿元"]);
+});
+
+test("the same figure in full width now merges instead of splitting the sources", () => {
+  const facts = [
+    fact("f0", "s0", "此次交易涉及金额约 23 亿美元"),
+    fact("f1", "s1", "此次交易涉及金额约 ２３ 亿美元"),
+  ];
+  expect(mergeFacts(facts)).toHaveLength(1);
+});
+
+test("NFKC does NOT over-merge: a full-width figure that really differs stays apart", () => {
+  // 折全角是为了让漏掉的数字被看见，不是为了让不同的数字撞在一起。
+  const facts = [
+    fact("f0", "s0", "此次交易涉及金额约 ２３ 亿美元"),
+    fact("f1", "s1", "此次交易涉及金额约 31 亿美元"),
+  ];
+  expect(mergeFacts(facts)).toHaveLength(2);
+  expect(numericSignature("涉及金额约 ２３ 亿美元"))
+    .not.toEqual(numericSignature("涉及金额约 ２３ 亿欧元"));
+});
