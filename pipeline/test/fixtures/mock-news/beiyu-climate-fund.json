@@ -1,0 +1,61 @@
+{
+  "synthetic": true,
+  "_note": "这是为演示管线而造的虚构数据，不是真实报道。国家、基金、媒体、数字全部是编的，url 指向不存在的域名。任何一段都不得被当作事实引用或对外发布。",
+  "_shape": "核心事实在各独立信源里写成字句相同的独立短句、每句只带一个数字——见 lanxin-q3.json 的 _shape。",
+  "slug": "beiyu-climate-fund",
+  "topic": "国际",
+  "plant": {
+    "reprint": "s3 东岭日报 转载 s0 环屿通讯社（creditedTo + 正文大段重复）",
+    "numericConflict": null,
+    "semanticConflict": null
+  },
+  "news": {
+    "publisher": "环屿通讯社",
+    "title": "北屿南川牵头设立 120 亿美元气候适应基金，42 国签署",
+    "url": "https://example.com/huanyu-wire/2026/climate-fund"
+  },
+  "durationSec": 120,
+  "register": 0.55,
+  "sources": [
+    {
+      "id": "s0",
+      "url": "https://example.com/huanyu-wire/2026/climate-fund",
+      "publisher": "环屿通讯社",
+      "publishedAt": "2026-09-13T21:00:00+08:00",
+      "body": "北屿与南川两国牵头的气候适应基金在今日发布的联合公报中正式确定。基金规模 120 亿美元。公报由 42 个国家签署。签署方承诺在 2030 年前将排放削减 45%。首笔拨款 8 亿美元。公报提到，这笔钱将优先用于岛屿国家的海岸防护工程，但全文没有写明退出机制。",
+      "creditedTo": null
+    },
+    {
+      "id": "s1",
+      "url": "https://example.com/baishiwan-daily/world/communique",
+      "publisher": "白石湾日报",
+      "publishedAt": "2026-09-13T22:35:00+08:00",
+      "body": "白石湾日报查阅了北屿与南川发布的联合公报全文以及随附的三份附件。基金规模 120 亿美元。公报由 42 个国家签署。签署方承诺在 2030 年前将排放削减 45%。首笔拨款 8 亿美元。公报列出的时间表显示这笔钱定于明年一季度划出，多国代表在会后表示，执行细则仍然需要进一步谈判，尤其是核查口径。",
+      "creditedTo": null
+    },
+    {
+      "id": "s2",
+      "url": "https://example.com/wuzhou-evening/world/presser",
+      "publisher": "芜洲晚报",
+      "publishedAt": "2026-09-14T00:12:00+08:00",
+      "body": "芜洲晚报驻外记者参加了公报发布会并在现场提问。基金规模 120 亿美元。公报由 42 个国家签署。签署方承诺在 2030 年前将排放削减 45%。首笔拨款 8 亿美元。官员在回答资金来源的提问时说，这笔钱来自成员国的财政预算而不是私人部门；记者注意到，两个排放大国没有出现在签署名单上。",
+      "creditedTo": null
+    },
+    {
+      "id": "s3",
+      "url": "https://example.com/dongling-daily/world/climate",
+      "publisher": "东岭日报",
+      "publishedAt": "2026-09-14T06:40:00+08:00",
+      "body": "【转自环屿通讯社】北屿与南川两国牵头的气候适应基金在今日发布的联合公报中正式确定。基金规模 120 亿美元。公报由 42 个国家签署。签署方承诺在 2030 年前将排放削减 45%。首笔拨款 8 亿美元。公报提到，这笔钱将优先用于岛屿国家的海岸防护工程，但全文没有写明退出机制。",
+      "creditedTo": "环屿通讯社"
+    },
+    {
+      "id": "s4",
+      "url": "https://example.com/beiya-observer/post/fund-governance",
+      "publisher": "北崖观察",
+      "publishedAt": "2026-09-14T10:55:00+08:00",
+      "body": "北崖观察就这只气候基金采访了三位政策研究者。他们普遍认为，资金到位的节奏比总量更关键，历史上多只同类基金的实际拨付率不足六成。其中一位指出，基金的治理结构尚未公布，这会直接影响后续的监督安排；另一位提醒，承诺与履约之间通常还隔着一轮国内立法。",
+      "creditedTo": null
+    }
+  ]
+}
