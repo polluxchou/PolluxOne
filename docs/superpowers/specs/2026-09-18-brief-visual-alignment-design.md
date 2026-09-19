@@ -79,6 +79,7 @@
 | 杂 | clipboardBorder | #38332B | ③ 剪贴板条的边 |
 | | barTrack | #1F1D19 | ⑤ token 条的槽 |
 | | noteBg | #141311 | ⑦ 底部提示条 |
+| | pillNeutral | #1E1C19 | ② 中性计数 pill 的底 |
 | 主色 | accent | #C49A6C | 主按钮、¥、计时、旋钮、旋转环、字标 |
 | | onAccent | #14120F | 主按钮文字 |
 | | accentMid | #8A6A45 | token 条第二段 |
@@ -107,7 +108,7 @@
 | 中文正文、标题、标签 | 系统 PingFang SC（`.system`） | 不打包。mock 的 Noto Sans SC 三个字重约 25–30MB，手机上与苹方几乎分不出 |
 | **所有数字**：时长、token、¥、时间戳、计数、时钟 | IBM Plex Mono 400 / 500 | 打包 `Resources/Fonts/IBMPlexMono-Regular.ttf`、`IBMPlexMono-Medium.ttf`、`OFL.txt`；启动时 `CTFontManagerRegisterFontsForURL` 注册；不碰 Info.plist |
 
-`BriefTheme.Font.mono(size, weight)` 在注册失败时退回 `.system(size:, design: .monospaced)`，界面永不因为字体崩。`monospacedDigit()` 不再用于这六屏——数字整体换字体，不只是等宽数字。
+`BriefTheme.mono(size, weight)` 在注册失败时退回 `.system(size:, design: .monospaced)`，界面永不因为字体崩。`monospacedDigit()` 不再用于这六屏——数字整体换字体，不只是等宽数字。
 
 ### 4.4 尺寸
 
@@ -132,7 +133,7 @@
 |---|---|
 | `BriefTopRow(onBack:) { trailing }` | 返回方块 + 任意尾部内容（新闻卡 / 标题 / 计时 / 字标）。每屏自己放一个，`BriefFlow.backBar` 删掉。返回**去哪**仍由 `BriefNavigation.back(from:)` 定，这里只负责画 |
 | `NewsTagCard(news:)` | 替换 `NewsTag`。有 `url` 才显示 chevron，点了 `openURL`；没有就只是一张静态卡 |
-| `PrimaryButton(title, icon?, action)` | 青铜主按钮；`isEnabled == false` 时 surface 底 + textDisabled 字（③ 的空输入态） |
+| `PrimaryButton(title, icon?, tone, size, isEnabled, action)` | 青铜主按钮；`isEnabled == false` 时 border 色（#2B2823）底 + textDisabled 字（③ 的空输入态）；`tone: .broke` 时 brokeBg / brokeText（④ 余额不够）；`size: .compact` 是 ③ 卡片内那枚（15pt / 内边距 15 / 圆角 11） |
 | `SecondaryButton(title, action)` | 描边次级按钮 |
 | `TextLinkButton(title, tint, action)` | ⑤ 取消那种一行灰字 |
 | `StageSpinner(size, stroke)` | 青铜旋转环，替换系统 `ProgressView`（⑤、⑦） |
@@ -205,7 +206,7 @@
 - token 卡：surfaceDeep 底 borderDeep 边圆角 14，内边距 20 / 18 / 18，间距 16。
   - 首行：40pt mono text1 字距 -0.03em 行高 1 + 12.5pt text4「tokens」；右侧 ¥ 17pt mono accent。
   - 条：高 11 圆角 3，槽 #1F1D19；三段按 `TokenBar` 排序依次 accent / accentMid / accentDeep；25% / 50% / 75% 处 1pt canvas 刻度线。
-  - 图例：7pt 方点圆角 2 + 阶段名 11.5pt text3 + **数值** 11.5pt mono text2（`38.1K` 格式：千为单位一位小数）。
+  - 图例：7pt 方点圆角 2 + 阶段名 11.5pt text3 + **数值** 11.5pt mono text2。只列 token 最多的前三段——第四段起在 11.5pt 上排不下，条本身把所有段都画了。数值 ≥1000 写 `38.1K`（千为单位一位小数），否则写原数。
   - 1pt dividerSoft。
   - 「预算 120K · 已用 40%」「本月余额 2.41M」11.5pt text4，数字部分 mono text3。
 - 阶段列表，每行内边距 9 / 0，间距 13：
@@ -219,9 +220,9 @@
 ### ⑥ 不建议播 `InsufficientView`
 
 - 顶行：只有返回。
-- 正文区间距 24：26pt 警告图标 danger 2pt 描边 → 标题 25pt 700 行高 1.4（`state.headline`）→ 14.5pt text3 行高 1.68（`insufficientReason`，nil 则整段不出现）。
+- 正文区间距 24：26pt 警告图标 danger 2pt 描边 → 标题 25pt 700 行高 1.4，文字是 `InsufficientState.title`「这条我不建议你现在播」（mock 原话；spec §5.1 说产品必须敢说这句）→ 14.5pt text3 行高 1.68（`insufficientReason`，nil 则整段不出现）。
 - 1pt rule。
-- 「问题在哪」12pt textDisabled 字距 0.08em 500；一张卡（surface 圆角 11 内边距 15 / 16）：首行 15pt mono danger「`found` / `required`」+ 13.5pt 500 text1 现有 headline；次行 12.5pt text3 `costNote`。
+- 「问题在哪」12pt textDisabled 字距 0.08em 500；一张卡（surface 圆角 11 内边距 15 / 16）：首行 15pt mono danger「`state.found` / `state.required`」+ 13.5pt 500 text1 现有 `headline`；次行 12.5pt text3 `costNote`。
 - 底部：第一个 action 走 `PrimaryButton`，第二个走 `SecondaryButton`。按钮清单仍从 `InsufficientState.actions` 长出来。
 
 不画：「14 → 2」的归并卡（没有总篇数）、两家互相打架的引文卡（`ClaimEvidence` 没有冲突表示）、「官方通报通常 2–6 小时内落地」提示条与「帮我盯着」按钮（没有这个动作）。这三样等 `2026-09-18-brief-live-pipeline.md` 把 `conflicted` claim 送到 iOS 之后另开 spec。
@@ -232,7 +233,7 @@
 - 顶行：返回 + 19pt 700「换一篇」。
 - 顶行下 22：`PrimaryButton`「从一条新闻开始」带 18pt 加号 → `.handOff`。替代原工具栏「+ 交给我」。
 - 「正在调研」组（组名 11.5pt text4 字距 0.06em，组内间距 11）：卡 surface 底 `accent.opacity(0.26)` 边圆角 12 内边距 15 / 16——`StageSpinner` 14pt + 标题 14.5pt text1 单行截断；次行左「交叉验证 9 / 23」11.5pt mono text3，右「48K · 04:12」11.5pt mono text4；底 3pt 进度槽 dividerSoft、已完成阶段比例 accent。点击 → `ScriptSlot(brief:).destination`。
-- 「可以拍了」组：卡 surface 底 borderSoft 边圆角 12 内边距 14 / 15——标题 15pt text1 单行截断；次行 11.5pt mono：秒数 text2 · 3pt neutralLine 圆点 · 「5 绿」strong · 「1 黄」weak（为 0 的不写）。Brief 卡点击 → `ScriptSlot(brief:).destination`；Web 稿卡点击 → `onSelectScript(script)`，`BriefFlow` 调 `sessionManager.prepare(script:)` 后回相机，**不再 push 第二个 `RecordingView`**。
+- 「可以拍了」组：卡 surface 底 borderSoft 边圆角 12 内边距 14 / 15——标题 15pt text1 单行截断；次行 11.5pt mono：秒数 text2（只有 `.ready` 的 Brief 和 Web 稿有秒数）· 3pt neutralLine 圆点 · 「5 绿」strong · 「1 黄」weak（为 0 的不写）。Brief 卡点击 → `ScriptSlot(brief:).destination`；Web 稿卡点击 → `onSelectScript(script)`，`BriefFlow` 把它记成 `selectedScript` 交给根上的 `RecordingView`，后者的 `.task(id: script?.id)` 走一次 `prepare(script:)`，屏回相机。**不再 push 第二个 `RecordingView`**。
 - 信源不足的 Brief 单列第三组「信源不足」，同稿卡样式、danger 边，点击 → `.insufficient`。mock 没画这一态（画布上没有信源不足的稿），样式是从稿卡沿用的，不是新设计。
 - 底部提示条：#141311 底圆角 10，14pt chevron + 12pt text4「点一篇直接载入提词器，相机已经在等着了。」
 - 空状态：`PrimaryButton` + 同款提示条写 `ScriptListEmptyState.text`。
@@ -249,8 +250,9 @@
 | `DialState.maxAffordableRegister(durationSec:) -> Double?`：该档时长下余额能买到的最大 register；整行买得起返回 nil；register 0 也买不起返回 0 | 单调：时长越长返回值不增；边界处 `estimate.tokens <= remaining`，再加 0.01 则超过；`remainingTokens == .max` 时全部 nil |
 | `DialState.registerName`：`Int((register * 4).rounded())` → 「八卦 / 通俗 / 平实 / 偏专业 / 专业」 | 0 → 八卦、0.25 → 通俗、0.5 → 平实、0.7 → 偏专业、1 → 专业 |
 | `snap(.casualMinute)` 的 register **0.0 → 0.25** | 两个锚点的 `registerName` 分别是「通俗」「偏专业」（spec §2.2 的原话） |
-| `HandOffState.voicePhase: HandOffVoicePhase = .idle`（`idle / listening`）、`mutating toggleListening()`；`canProceed` 在 `.speaking` 档**一律为假**（直到语音抓取接上） | 切到打字档自动回 idle；speaking 档 idle 与 listening 都不能开始；打字档有非空文字才能开始 |
-| `ScriptListRow` 增 `seconds: Int?`、`strong: Int`、`weak: Int`、`stageLine: String?`、`tokensUsedK: Int?`、`progress: Double?`、`status: BriefStatus?`；`build` 用 `SentenceCounts` 算绿黄 | fixture 那篇：seconds 83、strong 3、weak 1；调研中那篇 stageLine 取 running 阶段的 `name + count`，progress = done / total |
+| `HandOffState.voicePhase: HandOffVoicePhase = .idle`（`idle / listening`）、`mutating toggleListening()`；`mode` 切到 `.typing` 时 `voicePhase` 自动回 idle；`canProceed` 在 `.speaking` 档**一律为假**（直到语音抓取接上） | 切到打字档自动回 idle；打字档没有「听」；speaking 档 idle 与 listening 都不能开始；打字档有非空文字才能开始 |
+| `InsufficientState` 增 `found` / `required` 存储属性，与 `static let title = "这条我不建议你现在播"` | found 2、required 3；title 与 mock 一字不差 |
+| `ScriptListRow` 去掉 `subtitle`，增 `seconds: Int?`、`strong: Int`、`weak: Int`、`stageLine: String?`、`tokensUsedK: Int?`、`progress: Double?`、`status: BriefStatus?`、`group: ScriptListGroup`；`build` 用 `SentenceCounts` 算绿黄 | fixture 那篇：seconds 83、strong 2、weak 1、group `.ready`；调研中那篇 seconds nil、stageLine「交叉验证 9 / 23」、tokensUsedK 48、progress 4/9、group `.researching`；Web 稿 group `.ready`、strong 0 |
 
 `HandOffView` 的 `onSubmit` 只会从打字档、带非空文字被调用。`BriefFlow` 里给空文字兜底的「口述的一条新闻」随之成为死代码，一并删掉。
 
@@ -266,7 +268,8 @@
 |---|---|
 | `FlipButton` | 命中区放大到 ≥44×44（`contentShape`）；禁用态外层 `.contentShape(Rectangle()).onTapGesture {}` 吞掉点击，视觉仍是 35% 透明 |
 | `SafeWordIndicatorView` | 它是仪表不是按钮，但也是控件带——同样 ≥44×44 命中区并吞掉点击 |
-| `ScriptSlotView`、`RecordButton`、参数行、镜头药丸 | 复核命中区 ≥44，已满足的不改 |
+| `ScriptSlotView`（60×60）、`RecordButton`（74） | 已 ≥44，不改 |
+| 参数行、镜头药丸 | 不改。命中区略小于 44，但没有误触报告，放大它们要动 HUD 尺寸，超出本 spec |
 | `RecordingView` | 不动。不做整片禁焦区——画面下三分之一仍然可以对焦 |
 
 验收只能真机 / 模拟器：录制中点翻转键，不出对焦框；点电平表，不出对焦框；点两者旁边 8pt 以外的画面，正常对焦。
