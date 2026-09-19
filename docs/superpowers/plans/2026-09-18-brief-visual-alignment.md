@@ -68,6 +68,8 @@ Expected: `** BUILD SUCCEEDED **`（2026-09-18 在 HEAD `031e8c5` 上验证过�
 
 已在 `a329acc` 做掉、本计划不再碰：`AccentColor.colorset` 已是 #C49A6C；`SentenceAccent` 已拆出 `labelColor` / `labelBackground`。
 
+`Resources/demo-briefs/` 里已有 5 篇真稿（另一个会话产的，2026-09-18）；`BriefFixture.loadAllFromBundle()` 优先读它们。测试台的断言仍然读 `brief-fixture.json`（`fixturePath`），两边互不影响。
+
 **不许动**（各有断言钉着）：
 
 - `SentenceStyle` 的映射：观点句永远 `.neutral`；2 个独立源仍是 `.weak`
@@ -852,7 +854,9 @@ EOF
 - Modify: `ios/Pollux One/Features/Brief/ReviewView.swift`、`ConfirmView.swift`、`BriefProgressView.swift`、`HandOffView.swift`、`InsufficientView.swift`（各两处小改）
 - Delete: `ios/Pollux One/Features/Brief/NewsTag.swift`
 
-这一步只改结构，不换皮：每屏拿到一个 `onBack`，用 `BriefTopRow` 顶替旧的 `NewsTag`；`BriefFlow` 的 `backBar` 删掉、底色换成 canvas；⑦ 不再自带 `NavigationStack`，选 Web 稿不再 push 第二个相机。Task 5–13 逐屏重写时会再次给出完整文件，这里的小改是为了让每一步都能编译。
+这一步只改结构，不换皮：每屏拿到一个 `onBack`，用 `BriefTopRow` 顶替旧的 `NewsTag`；`BriefFlow` 的 `backBar` 删掉、底色换成 canvas；⑦ 不再自带 `NavigationStack`，选 Web 稿不再 push 第二个相机。
+
+**返回语义**：每屏拿到的 `onBack` 只能是 `BriefFlow.back(from:)` 产出的闭包。屏没有 `screen` 状态、也不在 NavigationStack 里，`dismiss()` 在这里什么也不做，所以屏自己没有办法「回上一屏」。`BriefFlow.screenContent` 里六处 `back(from:)` 是这条规矩现在的全部——**不要在那里手写 `screen = …` 当返回**（spec §5）。Task 5–13 逐屏重写时会再次给出完整文件，这里的小改是为了让每一步都能编译。
 
 - [ ] **Step 1: 替换 `BriefFlow.swift`**
 
@@ -2621,6 +2625,8 @@ Teach the dial its five names and where the money runs out
 
 The register axis reads 八卦 to 专业 in five steps, so the casual anchor
 moves from 0 to 0.25 and finally says 通俗 as the spec always claimed.
+The old 0.0 was a wrong value, not a product decision this change
+reverses: spec §2.2 has said "1:00 通俗" since the day it was written.
 For each duration step the dial can now answer how far right the balance
 reaches, by bisection over the estimate rather than by inverting a
 formula that is due to be recalibrated. The confirm screen will draw
@@ -4167,7 +4173,7 @@ xcrun simctl list runtimes            # 应看到 iOS 26.x
 xcrun simctl list devices available | grep "Pollux One iPhone"
 ```
 
-`Resources/demo-briefs/` 落地之后（另一个 worktree 在产 5 篇）要再跑一遍下面的清单——七屏有真内容时对得更准。
+`Resources/demo-briefs/` 已经有 5 篇真稿（app 启动时优先读它们，`brief-fixture.json` 只是兜底），清单就用它们跑——七屏有真内容时对得更准。
 
 - [ ] **Step 1: 起模拟器、装 app、看字体日志**
 
@@ -4204,7 +4210,7 @@ xcrun simctl io booted screenshot ~/Desktop/brief-<屏号>.png
 
 - [ ] ②：观点句是虚线边；点开一条证据，整行有 5% 底；「开拍」青铜；底栏上沿有分隔线；左滑事实句露两个按钮（重查 / 删除）、观点句一个
 - [ ] ③：字标 + 「今天播什么？」 + 卡片 + 「或者」；tab 是胶囊不是系统 segmented；「开始调研」在卡片里，空输入时是 #2B2823 底的禁用态；切到「说给我听」没有「开始调研」；点麦克风进 listening（光晕 + 五根竖条），再点回 idle
-- [ ] ④：372pt 方盘；拖动时十字准线跟着旋钮；两个推荐档位文字是「1:00 通俗」「3:00 偏专业」，点了旋钮吸过去；把 `brief-fixture.json` 的 `remainingThisMonth` 临时改成 60000 再跑一遍——右下出现斜纹、读数变红、按钮变暗红「余额不够，去充值」不可点，改回来
+- [ ] ④：372pt 方盘；拖动时十字准线跟着旋钮；两个推荐档位文字是「1:00 通俗」「3:00 偏专业」，点了旋钮吸过去；把 `Resources/demo-briefs/` 里 id 序最小那一篇的 `budget.remainingThisMonth` 临时改成 60000（app 读的是 demo 稿，不是 fixture）再跑一遍——右下出现斜纹、读数变红、按钮变暗红「余额不够，去充值」不可点，改回来
 - [ ] ⑤：token 条三段青铜 + 三条刻度；图例带数值；进行中阶段是青铜底卡片、旋转环在转；完成的勾是绿的；顶行计时青铜色
 - [ ] ⑥：图标红；「问题在哪」一张卡，首行 `2 / 3`；两个按钮一主一次；**没有**「仍然按现有材料出一稿」
 - [ ] ⑦：没有「Pollux One」大标题；顶部青铜「从一条新闻开始」；分组卡片；点一篇 Web 稿回到相机且提词块出现、不出现第二个相机（Mock 后端的 scripts 列表里有稿才试得了这一条）

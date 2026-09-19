@@ -131,7 +131,7 @@
 
 | 组件 | 职责 |
 |---|---|
-| `BriefTopRow(onBack:) { trailing }` | 返回方块 + 任意尾部内容（新闻卡 / 标题 / 计时 / 字标）。每屏自己放一个，`BriefFlow.backBar` 删掉。返回**去哪**仍由 `BriefNavigation.back(from:)` 定，这里只负责画 |
+| `BriefTopRow(onBack:) { trailing }` | 返回方块 + 任意尾部内容（新闻卡 / 标题 / 计时 / 字标）。每屏自己放一个，`BriefFlow.backBar` 删掉。返回**去哪**仍由 `BriefNavigation.back(from:)` 定，这里只负责画。**一条要认的代价**：原先 `back(from:)` 只有一个调用点，「审稿页回不到等待页」是结构上守住的；拆成每屏一个返回方块后，`BriefFlow.screenContent` 里有六处调用。屏本身拿到的只是 `BriefFlow.back(from:)` 产出的闭包——屏没有 `screen` 状态、也不在 NavigationStack 里，`dismiss()` 在这里无效——所以绕过 `BriefNavigation` 的唯一写法是在 `BriefFlow` 里手写 `screen = …`，和 backBar 时代一样。这条规矩因此从「一个调用点」变成「一个文件」，review `BriefFlow` 时盯着它 |
 | `NewsTagCard(news:)` | 替换 `NewsTag`。有 `url` 才显示 chevron，点了 `openURL`；没有就只是一张静态卡 |
 | `PrimaryButton(title, icon?, tone, size, isEnabled, action)` | 青铜主按钮；`isEnabled == false` 时 border 色（#2B2823）底 + textDisabled 字（③ 的空输入态）；`tone: .broke` 时 brokeBg / brokeText（④ 余额不够）；`size: .compact` 是 ③ 卡片内那枚（15pt / 内边距 15 / 圆角 11） |
 | `SecondaryButton(title, action)` | 描边次级按钮 |
