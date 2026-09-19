@@ -30,8 +30,14 @@ export interface Ports {
   findSources: (headline: string) => Promise<string[]>;
   extractFacts: (source: Source) => Promise<Fact[]>;
   /**
-   * ⑤ 的语义一半：数字上看不出来的矛盾——「官方否认将要降准」对「消息人士
-   * 称降准已定」，两句话一个数字都没有，`findNumericConflicts` 永远判不出来。
+   * ⑤ 的语义一半：数字上看不出来、但两条不能一起播的分歧——「官方否认将要
+   * 降准」对「消息人士称降准已定」，两句话一个数字都没有，
+   * `findNumericConflicts` 永远判不出来。
+   *
+   * 判据是「摆进同一篇稿子会让听众无所适从」，**不是**「逻辑上不可同时为真」：
+   * 上面那一对在逻辑上完全可以同时为真（官方确实否认了，消息人士也确实那么
+   * 说了），按后者去问，模型答「不冲突」并没有答错。判据的正文在
+   * `buildConflictPrompt`，这里的例子和那边的例子必须是同一套。
    *
    * 判定结果经 `CoreInput.externalConflicts` 并回内核的冲突图，和代码判出来的
    * 数字冲突**合并**。判决权仍在代码：模型只回一个二分类。
