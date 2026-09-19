@@ -441,6 +441,112 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
                  "3 分钟偏专业比 1 分钟通俗贵",
                  detail: "\(cheapDial.estimate.costCents) → \(proDial.estimate.costCents)")
 
+    report.section("⑦ 换一篇：多份 Brief 的加载")
+
+    // 真正的 demo 目录由另一条管线写出来，测试台不碰它——这里每一份数据都
+    // 是在临时目录里现搭的，所以这一节在那个目录还不存在时也照样有话可说。
+    let demoRoot = URL(fileURLWithPath: NSTemporaryDirectory())
+        .appendingPathComponent("brief-demo-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: demoRoot) }
+
+    // 目录不存在：退回单份，且不是崩。
+    let demoAbsentDir = demoRoot.appendingPathComponent("从来没建过").path
+    let demoFromAbsent = (try? BriefFixture.loadAll(inDirectory: demoAbsentDir,
+                                                    fallback: fixturePath)) ?? []
+    report.check(demoFromAbsent.count == 1,
+                 "目录不存在时退回单份 fixture", detail: "\(demoFromAbsent.count)")
+    report.check(demoFromAbsent.first == brief, "退回的就是现在那一份，行为不退步")
+
+    // 空目录：同上。空跟不存在对用户是同一件事——都是「还没有 demo 稿」。
+    let demoEmptyDir = demoRoot.appendingPathComponent("空的")
+    try? FileManager.default.createDirectory(at: demoEmptyDir, withIntermediateDirectories: true)
+    let demoFromEmpty = (try? BriefFixture.loadAll(inDirectory: demoEmptyDir.path,
+                                                   fallback: fixturePath)) ?? []
+    report.check(demoFromEmpty.count == 1, "空目录同样退回单份", detail: "\(demoFromEmpty.count)")
+    report.check(demoFromEmpty.first == brief, "退回的内容一致")
+
+    // 没有兜底又一篇都没有：报错，不是返回一个假装成功的空数组。
+    var demoThrew = false
+    do { _ = try BriefFixture.loadAll(inDirectory: demoEmptyDir.path) } catch { demoThrew = true }
+    report.check(demoThrew, "没有兜底又一篇都没有时如实报错")
+
+    // 一份坏 JSON 混在好文件里：好的仍然被加载。
+    let demoMixedDir = demoRoot.appendingPathComponent("混着一份坏的")
+    try? FileManager.default.createDirectory(at: demoMixedDir, withIntermediateDirectories: true)
+    let demoIDs = ["b3", "b1", "b2"]
+    for demoID in demoIDs {
+        if let demoData = briefJSON(brief, id: demoID) {
+            try? demoData.write(to: demoMixedDir.appendingPathComponent("\(demoID).json"))
+        }
+    }
+    try? Data("{ 这不是 JSON".utf8).write(to: demoMixedDir.appendingPathComponent("b0-坏的.json"))
+    // 连 .json 都不是的也要被无视，而不是被当成稿去解。
+    try? Data("不是稿".utf8).write(to: demoMixedDir.appendingPathComponent("README.txt"))
+
+    let demoMixed = (try? BriefFixture.loadAll(inDirectory: demoMixedDir.path,
+                                               fallback: fixturePath)) ?? []
+    report.check(demoMixed.count == 3,
+                 "坏的那份只少一篇，不拖垮整批", detail: "\(demoMixed.count)")
+    report.check(!demoMixed.contains { $0.id == "b0" }, "坏的那份没被算进来")
+    report.check(demoMixed.map(\.id) == ["b1", "b2", "b3"],
+                 "按 id 排好，不是目录枚举的顺序", detail: demoMixed.map(\.id).joined(separator: ","))
+    report.check(demoMixed.allSatisfy { $0.sentences.count == brief.sentences.count },
+                 "好的那几份内容完整")
+
+    // 有好文件时不去碰兜底——退回单份只在一篇都没有时发生。
+    report.check(!demoMixed.contains { $0.id == brief.id },
+                 "有 demo 稿时不再掺进那份 fixture")
+
+    // 顺序稳定：同样的输入，两次加载给同样的顺序。否则每次启动「换一篇」
+    // 的列表都在跳，用户记不住自己那一篇在第几行。
+    let demoSecondPass = (try? BriefFixture.loadAll(inDirectory: demoMixedDir.path,
+                                                    fallback: fixturePath)) ?? []
+    report.check(demoSecondPass.map(\.id) == demoMixed.map(\.id), "两次加载顺序相同")
+    report.check(demoSecondPass == demoMixed, "两次加载内容也相同")
+
+    // 同 id 的两份只留一份：界面拿 id 当字典键，重复会让它崩。
+    if let demoDup = briefJSON(brief, id: "b2") {
+        try? demoDup.write(to: demoMixedDir.appendingPathComponent("b2-又一份.json"))
+    }
+    let demoDeduped = (try? BriefFixture.loadAll(inDirectory: demoMixedDir.path,
+                                                 fallback: fixturePath)) ?? []
+    report.check(demoDeduped.map(\.id) == ["b1", "b2", "b3"],
+                 "同 id 的两份只留一份", detail: demoDeduped.map(\.id).joined(separator: ","))
+
+    // 改一份不碰另一份。删句是 app 里最容易串稿的那个动作：它改的是 claims
+    // 字典和 sentences 数组，两份稿的 id 又长得一模一样。
+    if demoMixed.count == 3 {
+        var demoShelf = demoMixed
+        let demoVictim = demoShelf[0].sentences[0].id
+        demoShelf[0] = demoShelf[0].deletingSentence(demoVictim)
+        report.check(demoShelf[0].sentences.count == brief.sentences.count - 1,
+                     "被改的那一份少了一句", detail: "\(demoShelf[0].sentences.count)")
+        report.check(demoShelf[1] == demoMixed[1], "另一份一个字节都没动")
+        report.check(demoShelf[2] == demoMixed[2], "第三份同样没动")
+        report.check(demoShelf[1].sentences.contains { $0.id == demoVictim },
+                     "被删掉的那一句还在别的稿里好好待着")
+
+        // 删空的那一份降级成 ⑥，别的稿不跟着降级。
+        var demoEmptied = demoShelf[0]
+        for demoSentence in demoEmptied.sentences {
+            demoEmptied = demoEmptied.deletingSentence(demoSentence.id)
+        }
+        report.check(demoEmptied.status == .insufficient, "删空的那一份降成信源不足")
+        report.check(demoShelf[1].status == .ready, "邻居仍然是可审稿")
+        report.check(ScriptSlot(brief: demoEmptied).destination == .insufficient,
+                     "右下角那一格跟着降级的是被删空的那一份")
+        report.check(ScriptSlot(brief: demoShelf[1]).destination == .review,
+                     "换到邻居那一篇，那一格回到审稿")
+    } else {
+        report.check(false, "三份 demo 稿都搭起来了")
+    }
+
+    // ⑦ 的行数：多份 Brief 真的会变成多行可选，不再是永远的一条。
+    let demoRows = ScriptListRows.build(scriptTitles: [], briefs: demoMixed)
+    report.check(demoRows.count == demoMixed.count,
+                 "「换一篇」列表里有几份就有几行", detail: "\(demoRows.count)")
+    report.check(Set(demoRows.map(\.id)).count == demoRows.count, "每一行的 id 互不相同")
+
     return (report.pass, report.fail)
 }
 
@@ -465,4 +571,15 @@ func briefWithRecheckResult(_ base: Brief,
     ]
     guard let data = try? JSONSerialization.data(withJSONObject: raw) else { return nil }
     return try? JSONDecoder().decode(Brief.self, from: data)
+}
+
+/// 把 brief 编码回 JSON、换掉 `id`、再解回来。多份 demo 稿之间除了 id 全同，
+/// 于是"改一份会不会溅到另一份"这件事没有任何别的差异可以蒙混过去。
+@MainActor
+func briefJSON(_ base: Brief, id: String) -> Data? {
+    guard let encoded = try? JSONEncoder().encode(base),
+          var raw = try? JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+    else { return nil }
+    raw["id"] = id
+    return try? JSONSerialization.data(withJSONObject: raw)
 }

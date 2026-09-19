@@ -16,20 +16,27 @@ struct ScriptListView: View {
     private let syncService: ScriptSyncService
     /// 还没有变成 Script 的那些——在跑的、可审的、信源不足的。
     private let briefs: [Brief]
+    /// 点中了哪一条 Brief。列表里现在不止一条，所以"去哪一屏"之外还得说清
+    /// "看的是哪一篇"——容器靠这一下把当前选中切过去。
+    private let onSelect: (Brief) -> Void
     /// 跳去 Brief 那一侧的屏（空状态的「交给我」，以及点一条 Brief）。
     private let onOpen: (BriefScreen) -> Void
 
     init(syncService: ScriptSyncService,
          briefs: [Brief] = [],
+         onSelect: @escaping (Brief) -> Void = { _ in },
          onOpen: @escaping (BriefScreen) -> Void = { _ in }) {
         self.syncService = syncService
         self.briefs = briefs
+        self.onSelect = onSelect
         self.onOpen = onOpen
         _viewModel = State(wrappedValue: ScriptListViewModel(syncService: syncService))
     }
 
+    /// 同 id 的两份只留先到的那一份。加载器已经去过重，这里再挡一道，
+    /// 是因为 `uniqueKeysWithValues` 撞键会直接崩——列表不该有这种雷。
     private var briefsByID: [String: Brief] {
-        Dictionary(uniqueKeysWithValues: briefs.map { ($0.id, $0) })
+        Dictionary(briefs.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     private var scriptsByID: [String: Script] {
@@ -56,6 +63,8 @@ struct ScriptListView: View {
                     List(rows) { row in
                         if let brief = briefsByID[row.id] {
                             Button {
+                                // 先切当前，再跳屏：跳过去那一屏读的就是这一篇。
+                                onSelect(brief)
                                 onOpen(ScriptSlot(brief: brief).destination)
                             } label: {
                                 ScriptListRowView(row: row)
