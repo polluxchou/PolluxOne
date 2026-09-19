@@ -51,7 +51,36 @@ struct DialState: Equatable {
         let perSecond = 380
         let registerMultiplier = 1.0 + register * 0.35
         let tokens = Int(Double(base + perSecond * durationSec) * registerMultiplier)
-        return BriefEstimate(tokens: tokens, costCents: max(1, tokens / 3_400))
+        return BriefEstimate(tokens: tokens, costCents: Self.costCents(forTokens: tokens))
+    }
+
+    /// DeepSeek 的**高峰**价，人民币分 / 每百万 token（官方价目，查证于 2026-09-18）。
+    ///
+    /// 一律按高峰估，不按空闲：高峰是空闲的两倍，而估低了的后果是用户看着一个
+    /// 数字开跑、收到一张两倍的账单。估高只是让他觉得贵。
+    private enum PeakRate {
+        static let flashInput = 200      // 缓存未命中；命中是 4，但开跑前不知道会不会命中
+        static let flashOutput = 800
+        static let proOutput = 2_700
+    }
+
+    /// token 的去向构成。这三个数是**假设**，不是测量——Task 16 会用真实样本
+    /// 回归它们。放在这里而不是揉进一个除数里，是为了让它错的时候看得出错在哪：
+    /// 一个 `tokens / 3_400` 没法告诉任何人它凭什么是 3400。
+    private enum Mix {
+        /// ③ 抽事实点要读十几篇全文，输入占大头
+        static let flashInputShare = 0.80
+        static let flashOutputShare = 0.15
+        /// ⑦ 成稿用 v4-pro，量小但单价贵一个量级
+        static let proOutputShare = 0.05
+    }
+
+    static func costCents(forTokens tokens: Int) -> Int {
+        let perMTok =
+            Mix.flashInputShare * Double(PeakRate.flashInput)
+            + Mix.flashOutputShare * Double(PeakRate.flashOutput)
+            + Mix.proOutputShare * Double(PeakRate.proOutput)
+        return max(1, Int((Double(tokens) / 1_000_000 * perMTok).rounded(.up)))
     }
 
     /// 余额门禁放在这一屏，因为这是**烧 token 之前的最后一屏**。

@@ -424,6 +424,23 @@ func runBriefSuite() -> (pass: Int, fail: Int) {
                      "独立源数持平不算变少")
     }
 
+    report.section("④ 成本估算按高峰价，只会高不会低")
+    report.check(DialState.costCents(forTokens: 1_000_000) == 415,
+                 "每百万 token 415 分 = 0.80×200 + 0.15×800 + 0.05×2700",
+                 detail: "\(DialState.costCents(forTokens: 1_000_000))")
+    report.check(DialState.costCents(forTokens: 1) == 1,
+                 "再小也不报 0 —— 跑一次就是要花钱的")
+    report.check(DialState.costCents(forTokens: 1_000_000) >= 415 / 2,
+                 "按高峰估，覆盖得住空闲时段的实际花费")
+
+    var cheapDial = DialState()
+    cheapDial.snap(to: .casualMinute)
+    var proDial = DialState()
+    proDial.snap(to: .professionalThreeMinutes)
+    report.check(proDial.estimate.costCents > cheapDial.estimate.costCents,
+                 "3 分钟偏专业比 1 分钟通俗贵",
+                 detail: "\(cheapDial.estimate.costCents) → \(proDial.estimate.costCents)")
+
     return (report.pass, report.fail)
 }
 
