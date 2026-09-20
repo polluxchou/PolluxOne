@@ -38,6 +38,7 @@ final class CameraEngine: NSObject {
     private var isRunningObservation: NSKeyValueObservation?
     /// Held only so deinit can unregister them; NotificationCenter's
     /// block-based observers are not removed automatically.
+    @ObservationIgnored
     nonisolated(unsafe) private var notificationObservers: [NSObjectProtocol] = []
 
     deinit {
@@ -151,27 +152,27 @@ final class CameraEngine: NSObject {
     private func observeSessionState() {
         guard isRunningObservation == nil else { return }
 
-        isRunningObservation = session.observe(\.isRunning, options: [.initial, .new]) { captureSession, _ in
+        isRunningObservation = session.observe(\.isRunning, options: [.initial, .new]) { [weak self] captureSession, _ in
             let running = captureSession.isRunning
             Task { @MainActor [weak self] in self?.isSessionRunning = running }
         }
 
         let center = NotificationCenter.default
         notificationObservers.append(
-            center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: .main) { notification in
+            center.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: session, queue: .main) { [weak self] notification in
                 let message = (notification.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription
                     ?? "unknown capture error"
                 Task { @MainActor [weak self] in self?.handleRuntimeError(message) }
             }
         )
         notificationObservers.append(
-            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: .main) { notification in
+            center.addObserver(forName: AVCaptureSession.wasInterruptedNotification, object: session, queue: .main) { [weak self] notification in
                 let reason = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int
                 Task { @MainActor [weak self] in self?.handleInterruption(reason) }
             }
         )
         notificationObservers.append(
-            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: .main) { _ in
+            center.addObserver(forName: AVCaptureSession.interruptionEndedNotification, object: session, queue: .main) { [weak self] _ in
                 Task { @MainActor [weak self] in self?.lastError = nil }
             }
         )
