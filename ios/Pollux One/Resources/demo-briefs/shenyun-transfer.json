@@ -1,0 +1,219 @@
+{
+  "id": "b-demo-shenyun-transfer",
+  "news": {
+    "publisher": "青洲体育报",
+    "title": "沈昀将加盟鹭岛海燕，签下五年合同，体检定于 11 月 3 日",
+    "url": "https://example.com/qingzhou-sports/2026/shenyun-to-ludao"
+  },
+  "status": "ready",
+  "estimatedSeconds": 31,
+  "pacedToUser": false,
+  "sentences": [
+    {
+      "id": "s1",
+      "text": "别急着划走，有些转会里的数字，单独听可能比比赛最后五分钟还刺激。",
+      "kind": "transition",
+      "claimIds": [],
+      "anchors": []
+    },
+    {
+      "id": "s2",
+      "text": "先说进攻端，沈昀上赛季在联赛打进24球，24球，这火力摆在台面上，够直观。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 16,
+          "length": 3,
+          "claimId": "c3"
+        },
+        {
+          "start": 20,
+          "length": 3,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s3",
+      "text": "再看合同，沈昀和鹭岛海燕的合同期是5年，合同期就是球员跟俱乐部绑定的时间长度，5年，不短了。",
+      "kind": "fact",
+      "claimIds": [
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 17,
+          "length": 2,
+          "claimId": "c2"
+        },
+        {
+          "start": 39,
+          "length": 2,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "text": "还有，这笔转会的体检安排在11月3日，体检就是签约前把身体指标查清楚那一关，日子已经定死。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 13,
+          "length": 5,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "text": "这配置，后面想低调都难。",
+      "kind": "opinion",
+      "claimIds": [],
+      "anchors": []
+    }
+  ],
+  "claims": {
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「沈昀与鹭岛海燕合同期为 5 年」",
+          "time": "19:05"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「沈昀与鹭岛海燕合同期为 5 年。」",
+          "time": "20:18"
+        },
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「沈昀与鹭岛海燕合同期为 5 年」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c3": {
+      "id": "c3",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「沈昀上赛季在联赛打进 24 球」",
+          "time": "19:05"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「沈昀上赛季在联赛打进 24 球。」",
+          "time": "20:18"
+        },
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「沈昀上赛季在联赛打进 24 球」",
+          "time": "21:40"
+        }
+      ]
+    },
+    "c4": {
+      "id": "c4",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "青洲体育报",
+          "note": "「体检安排在 11 月 3 日」",
+          "time": "19:05"
+        },
+        {
+          "publisher": "北崖观察",
+          "note": "「体检安排在 11 月 3 日。」",
+          "time": "20:18"
+        },
+        {
+          "publisher": "鹭岛晚报",
+          "note": "「体检安排在 11 月 3 日」",
+          "time": "21:40"
+        }
+      ]
+    }
+  },
+  "recheckResults": null,
+  "stages": [
+    {
+      "name": "抓取原文",
+      "state": "done",
+      "count": "1 篇",
+      "detail": null
+    },
+    {
+      "name": "扩展检索",
+      "state": "done",
+      "count": "4 篇",
+      "detail": null
+    },
+    {
+      "name": "抽取事实点",
+      "state": "done",
+      "count": "28 条",
+      "detail": null
+    },
+    {
+      "name": "归并去重",
+      "state": "done",
+      "count": "15 点 · 4 独立源",
+      "detail": null
+    },
+    {
+      "name": "交叉验证",
+      "state": "done",
+      "count": "3 / 15",
+      "detail": null
+    },
+    {
+      "name": "选点",
+      "state": "done",
+      "count": "3 条",
+      "detail": null
+    },
+    {
+      "name": "成稿",
+      "state": "done",
+      "count": "5 句",
+      "detail": null
+    },
+    {
+      "name": "挂信源",
+      "state": "done",
+      "count": "3 句挂上",
+      "detail": null
+    },
+    {
+      "name": "时长与气口",
+      "state": "done",
+      "count": "31 秒 · 19 个气口",
+      "detail": null
+    }
+  ],
+  "budget": {
+    "used": 14094,
+    "budgeted": 65000,
+    "remainingThisMonth": 3000000,
+    "costCents": 6,
+    "byStage": {
+      "抽取事实点": 5743,
+      "交叉验证": 5675,
+      "成稿": 2676
+    }
+  },
+  "insufficientReason": null
+}

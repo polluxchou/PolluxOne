@@ -11,7 +11,12 @@ let alignment = runAlignmentSuite()
 let voice = runVoiceSuite()
 let camera = runCameraSuite()
 let archive = await runArchiveSuite()
+let layout = runLayoutSuite()
+let pacing = runPacingSuite()
+let brief = runBriefSuite()
 
-let pass = alignment.pass + voice.pass + camera.pass + archive.pass
-let fail = alignment.fail + voice.fail + camera.fail + archive.fail
+let pass = alignment.pass + voice.pass + camera.pass + archive.pass + layout.pass + pacing.pass
+    + brief.pass
+let fail = alignment.fail + voice.fail + camera.fail + archive.fail + layout.fail + pacing.fail
+    + brief.fail
 print("\n══════ TOTAL: \(pass) passed, \(fail) failed ══════")

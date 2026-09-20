@@ -1,0 +1,507 @@
+{
+  "id": "b-demo-beiyu-climate-fund",
+  "news": {
+    "publisher": "环屿通讯社",
+    "title": "北屿南川牵头设立 120 亿美元气候适应基金，42 国签署",
+    "url": "https://example.com/huanyu-wire/2026/climate-fund"
+  },
+  "status": "ready",
+  "estimatedSeconds": 119,
+  "pacedToUser": false,
+  "sentences": [
+    {
+      "id": "s1",
+      "text": "未来十年的减排力度，可能会在今天的这份国际文件里出现一个关键注脚。",
+      "kind": "transition",
+      "claimIds": [],
+      "anchors": []
+    },
+    {
+      "id": "s2",
+      "text": "北屿与南川两国牵头的气候适应基金，已经在这份当日发布的联合公报中正式确定下来。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s3",
+      "text": "换句话说，这项基金能够成立，其直接的文件依据就是当天公布的这份联合公报。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s4",
+      "text": "这项由北屿与南川牵头的气候适应基金，是在当日通过联合公报对外宣布的。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s5",
+      "text": "签署这份联合公报的国家，总数是42个。",
+      "kind": "fact",
+      "claimIds": [
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 15,
+          "length": 3,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "text": "42个国家共同签署，是一次多国参与的联合行动。",
+      "kind": "fact",
+      "claimIds": [
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 5,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "text": "公报由42个国家签署，这是文件中可以直接查到的参与国家数量。",
+      "kind": "fact",
+      "claimIds": [
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 3,
+          "length": 5,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s8",
+      "text": "基金公布的总规模，是120亿美元。",
+      "kind": "fact",
+      "claimIds": [
+        "c1"
+      ],
+      "anchors": [
+        {
+          "start": 10,
+          "length": 6,
+          "claimId": "c1"
+        }
+      ]
+    },
+    {
+      "id": "s9",
+      "text": "120亿美元，是这项气候适应基金对外明确公布的资金总量。",
+      "kind": "fact",
+      "claimIds": [
+        "c1"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 6,
+          "claimId": "c1"
+        }
+      ]
+    },
+    {
+      "id": "s10",
+      "text": "这笔120亿美元的资金，作为基金盘子写入了公报。",
+      "kind": "fact",
+      "claimIds": [
+        "c1"
+      ],
+      "anchors": [
+        {
+          "start": 2,
+          "length": 6,
+          "claimId": "c1"
+        }
+      ]
+    },
+    {
+      "id": "s11",
+      "text": "签署方在公报中承诺，到2030年前将排放削减45%。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 11,
+          "length": 5,
+          "claimId": "c3"
+        },
+        {
+          "start": 22,
+          "length": 3,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s12",
+      "text": "45%的减排比例，对应的时间节点是2030年。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 3,
+          "claimId": "c3"
+        },
+        {
+          "start": 17,
+          "length": 5,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s13",
+      "text": "2030年之前削减45%的排放，是签署方共同作出的一个明确承诺。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 5,
+          "claimId": "c3"
+        },
+        {
+          "start": 9,
+          "length": 3,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s14",
+      "text": "基金的首笔拨款金额，是8亿美元。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 11,
+          "length": 4,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s15",
+      "text": "这8亿美元，是这项基金在启动之后已经拨出的第一笔资金。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 1,
+          "length": 4,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s16",
+      "text": "根据公报披露，首笔拨款8亿美元已经确定。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 11,
+          "length": 4,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s17",
+      "text": "再重复一遍，这项气候适应基金的牵头方，就是北屿与南川两国。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s18",
+      "text": "北屿和南川两国，在当日发布的联合公报中，以牵头国的身份出现。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s19",
+      "text": "42个国家的签署规模，在这份公报中可以直接看到。",
+      "kind": "fact",
+      "claimIds": [
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 5,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s20",
+      "text": "基金总规模120亿美元，在这份公报中被明确标示出来。",
+      "kind": "fact",
+      "claimIds": [
+        "c1"
+      ],
+      "anchors": [
+        {
+          "start": 5,
+          "length": 6,
+          "claimId": "c1"
+        }
+      ]
+    },
+    {
+      "id": "s21",
+      "text": "排放削减45%的目标，同样出自这份公报所载明的承诺条款。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 4,
+          "length": 3,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s22",
+      "text": "首笔拨款8亿美元，是这项基金正式开始运作的起点之一。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 4,
+          "length": 4,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s23",
+      "text": "当日发布的联合公报，是外界了解这项基金各项安排的主要文件。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s24",
+      "text": "这项基金能否真正撬动后续气候资金，将直接影响气候适应的实际进展。",
+      "kind": "opinion",
+      "claimIds": [],
+      "anchors": []
+    }
+  ],
+  "claims": {
+    "c0": {
+      "id": "c0",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「北屿与南川两国牵头的气候适应基金在今日发布的联合公报中正式确定。」",
+          "time": "21:00"
+        }
+      ]
+    },
+    "c1": {
+      "id": "c1",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「基金规模 120 亿美元。」",
+          "time": "21:00"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「基金规模 120 亿美元。」",
+          "time": "22:35"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「基金规模 120 亿美元。」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「公报由 42 个国家签署。」",
+          "time": "21:00"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「公报由 42 个国家签署。」",
+          "time": "22:35"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「公报由 42 个国家签署。」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c3": {
+      "id": "c3",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「签署方承诺在 2030 年前将排放削减 45%。」",
+          "time": "21:00"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「签署方承诺在 2030 年前将排放削减 45%。」",
+          "time": "22:35"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「签署方承诺在 2030 年前将排放削减 45%。」",
+          "time": "00:12"
+        }
+      ]
+    },
+    "c4": {
+      "id": "c4",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "环屿通讯社",
+          "note": "「首笔拨款 8 亿美元。」",
+          "time": "21:00"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「首笔拨款 8 亿美元。」",
+          "time": "22:35"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「首笔拨款 8 亿美元。」",
+          "time": "00:12"
+        }
+      ]
+    }
+  },
+  "recheckResults": null,
+  "stages": [
+    {
+      "name": "抓取原文",
+      "state": "done",
+      "count": "1 篇",
+      "detail": null
+    },
+    {
+      "name": "扩展检索",
+      "state": "done",
+      "count": "4 篇",
+      "detail": null
+    },
+    {
+      "name": "抽取事实点",
+      "state": "done",
+      "count": "29 条",
+      "detail": null
+    },
+    {
+      "name": "归并去重",
+      "state": "done",
+      "count": "15 点 · 4 独立源",
+      "detail": null
+    },
+    {
+      "name": "交叉验证",
+      "state": "done",
+      "count": "4 / 15",
+      "detail": null
+    },
+    {
+      "name": "选点",
+      "state": "done",
+      "count": "5 条",
+      "detail": null
+    },
+    {
+      "name": "成稿",
+      "state": "done",
+      "count": "24 句",
+      "detail": null
+    },
+    {
+      "name": "挂信源",
+      "state": "done",
+      "count": "22 句挂上",
+      "detail": null
+    },
+    {
+      "name": "时长与气口",
+      "state": "done",
+      "count": "119 秒 · 51 个气口",
+      "detail": null
+    }
+  ],
+  "budget": {
+    "used": 26536,
+    "budgeted": 125500,
+    "remainingThisMonth": 3000000,
+    "costCents": 20,
+    "byStage": {
+      "抽取事实点": 6313,
+      "交叉验证": 7188,
+      "成稿": 13035
+    }
+  },
+  "insufficientReason": null
+}

@@ -32,6 +32,19 @@ final class SlidingWindowAlignmentEngine: ScriptAlignmentEngine {
     private var script: Script?
     private var flatSentences: [(address: ScriptAddress, sentence: Sentence)] = []
     private var currentIndex = 0
+    /// The in-sentence token index last *earned* by a confident match.
+    ///
+    /// Held because "last known-good position" has to mean the whole position.
+    /// The low-confidence branch used to fall through to a `tokenOffset`
+    /// defaulting to 0, so a weak result reported the current sentence — true —
+    /// paired with its *start* — invented. Nothing read that field until the
+    /// fixed-window prompter made it load-bearing, and then one cough was
+    /// enough to hurt twice over: `ReadingPacer.correct` pulled the cursor a
+    /// quarter of the way back towards the sentence start (or seeked backwards
+    /// outright), and it moved `lastTruth` back with it, dropping the lookahead
+    /// ceiling so dead reckoning could not climb out again. Measured across
+    /// three noisy results while the reader kept reading: 73.6 -> 55.2 -> 37.4.
+    private var lastTokenOffset = 0
     private var lastEmittedText = ""
 
     func reset(script: Script, startingAt address: ScriptAddress?) {
@@ -56,6 +69,9 @@ final class SlidingWindowAlignmentEngine: ScriptAlignmentEngine {
         if let address, let match = flatSentences.firstIndex(where: { $0.address.sentenceId == address.sentenceId }) {
             currentIndex = match
         }
+        // A resume address names a sentence, not a token inside it, so the only
+        // honest in-sentence offset for a fresh take is its start.
+        lastTokenOffset = 0
         lastEmittedText = ""
     }
 
@@ -96,14 +112,22 @@ final class SlidingWindowAlignmentEngine: ScriptAlignmentEngine {
         }
 
         guard bestScore >= minimumConfidence else {
-            return currentPosition(confidence: bestScore)
+            // Nothing in the window owns what was just said — an ad-lib, a
+            // stumble, a cough, a passing siren. Hold the last position we
+            // actually earned, in both of its coordinates.
+            return currentPosition(confidence: bestScore, tokenOffset: lastTokenOffset)
         }
 
         currentIndex = bestIndex
+        lastTokenOffset = bestTokenOffset
         return currentPosition(confidence: bestScore, tokenOffset: bestTokenOffset)
     }
 
-    private func currentPosition(confidence: Double, tokenOffset: Int = 0) -> ReadingPosition {
+    /// `tokenOffset` has no default on purpose: the default of 0 it used to
+    /// carry is what let the low-confidence branch quietly report a fabricated
+    /// in-sentence position. Both callers now have to say which offset they
+    /// mean.
+    private func currentPosition(confidence: Double, tokenOffset: Int) -> ReadingPosition {
         let entry = flatSentences[currentIndex]
         return ReadingPosition(
             address: entry.address,

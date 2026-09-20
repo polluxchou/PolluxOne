@@ -46,7 +46,8 @@ struct ReadingProgress: Codable, Equatable {
 /// a user may pause the teleprompter without stopping the recording.
 struct RecordingSession: Identifiable, Codable, Equatable {
     let id: UUID
-    let scriptRevisionId: UUID
+    /// 可选：相机是根视图，没有稿也能开拍，那样的 take 不属于任何一篇稿。
+    let scriptRevisionId: UUID?
     var startedAt: Date
     var endedAt: Date?
     var cameraConfiguration: CameraConfiguration

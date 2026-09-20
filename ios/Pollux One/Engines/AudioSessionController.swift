@@ -18,14 +18,20 @@ enum AudioSessionController {
     /// `.playAndRecord` rather than `.record` so a future playback/review
     /// screen doesn't need to reconfigure mid-session. `.videoRecording` mode
     /// selects the mic processing Apple tunes for camera capture.
-    static func activateForRecording() throws {
+    ///
+    /// `setActive` is a blocking call, so it runs on a detached task rather
+    /// than wherever the caller happens to be (usually the main actor) —
+    /// otherwise it stalls the UI for the duration of the activation.
+    static func activateForRecording() async throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(
             .playAndRecord,
             mode: .videoRecording,
-            options: [.allowBluetooth, .defaultToSpeaker]
+            options: [.allowBluetoothHFP, .defaultToSpeaker]
         )
-        try session.setActive(true, options: [])
+        try await Task.detached(priority: .userInitiated) {
+            try session.setActive(true, options: [])
+        }.value
     }
 
     static func deactivate() {

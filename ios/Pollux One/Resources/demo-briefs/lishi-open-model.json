@@ -1,0 +1,468 @@
+{
+  "id": "b-demo-lishi-open-model",
+  "news": {
+    "publisher": "潮汐科技评论",
+    "title": "砺石智算开源 720 亿参数模型，权重与推理代码同步放出",
+    "url": "https://example.com/chaoxi-tech/2026/lishi-open-weights"
+  },
+  "status": "ready",
+  "estimatedSeconds": 132,
+  "pacedToUser": false,
+  "sentences": [
+    {
+      "id": "s1",
+      "text": "当一个开源基础模型同时公开参数规模训练数据和许可证条款时它进入的就是工程化评估而不是单纯演示。",
+      "kind": "transition",
+      "claimIds": [],
+      "anchors": []
+    },
+    {
+      "id": "s2",
+      "text": "砺石智算开源了其新一代语言模型。",
+      "kind": "fact",
+      "claimIds": [
+        "c0"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s3",
+      "text": "该模型参数规模为720亿。",
+      "kind": "fact",
+      "claimIds": [
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 8,
+          "length": 4,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s4",
+      "text": "720亿参数意味着推理部署时必须提前规划显存容量量化策略以及推理框架适配。",
+      "kind": "fact",
+      "claimIds": [
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 4,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s5",
+      "text": "训练数据规模为14万亿token。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 7,
+          "length": 9,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s6",
+      "text": "14万亿token的语料量级会直接影响模型在长尾领域多语言分布以及代码场景上的覆盖能力。",
+      "kind": "fact",
+      "claimIds": [
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 9,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s7",
+      "text": "该模型采用Apache2.0协议开源。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 5,
+          "length": 9,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s8",
+      "text": "Apache2.0对商用修改再分发给出明确许可专利授权条款也相对清晰因此对企业集成较为友好。",
+      "kind": "fact",
+      "claimIds": [
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 9,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s9",
+      "text": "模型权重与推理代码于10月9日上线。",
+      "kind": "fact",
+      "claimIds": [
+        "c5"
+      ],
+      "anchors": [
+        {
+          "start": 10,
+          "length": 5,
+          "claimId": "c5"
+        }
+      ]
+    },
+    {
+      "id": "s10",
+      "text": "权重与推理代码同日放出意味着用户可以跳过协议等待直接进入本地推理与适配流程。",
+      "kind": "fact",
+      "claimIds": [
+        "c5"
+      ],
+      "anchors": []
+    },
+    {
+      "id": "s11",
+      "text": "把新一代语言模型放在720亿参数这个量级砺石智算发布时的技术门槛已经摆明。",
+      "kind": "fact",
+      "claimIds": [
+        "c0",
+        "c2"
+      ],
+      "anchors": [
+        {
+          "start": 10,
+          "length": 4,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s12",
+      "text": "10月9日上线的是模型权重与推理代码而14万亿token的训练规模说明其训练侧投入并非增量微调。",
+      "kind": "fact",
+      "claimIds": [
+        "c3",
+        "c5"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 5,
+          "claimId": "c5"
+        },
+        {
+          "start": 19,
+          "length": 9,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s13",
+      "text": "以Apache2.0协议开放权重与推理代码企业从10月9日起即可基于明确许可进行内部验证与系统集成。",
+      "kind": "fact",
+      "claimIds": [
+        "c4",
+        "c5"
+      ],
+      "anchors": [
+        {
+          "start": 1,
+          "length": 9,
+          "claimId": "c4"
+        },
+        {
+          "start": 24,
+          "length": 5,
+          "claimId": "c5"
+        }
+      ]
+    },
+    {
+      "id": "s14",
+      "text": "720亿参数配合14万亿token的训练规模从参数量与数据量的量级看属于大规模预训练区间。",
+      "kind": "fact",
+      "claimIds": [
+        "c2",
+        "c3"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 4,
+          "claimId": "c2"
+        },
+        {
+          "start": 8,
+          "length": 9,
+          "claimId": "c3"
+        }
+      ]
+    },
+    {
+      "id": "s15",
+      "text": "砺石智算这次开源的新一代语言模型采用Apache2.0协议并放出权重与推理代码。",
+      "kind": "fact",
+      "claimIds": [
+        "c0",
+        "c4",
+        "c5"
+      ],
+      "anchors": [
+        {
+          "start": 18,
+          "length": 9,
+          "claimId": "c4"
+        }
+      ]
+    },
+    {
+      "id": "s16",
+      "text": "720亿参数14万亿tokenApache2.0这三项组合决定了它既可以进入研究也具备商用授权清晰评估条件。",
+      "kind": "fact",
+      "claimIds": [
+        "c2",
+        "c3",
+        "c4"
+      ],
+      "anchors": [
+        {
+          "start": 0,
+          "length": 4,
+          "claimId": "c2"
+        },
+        {
+          "start": 23,
+          "length": 1,
+          "claimId": "c2"
+        }
+      ]
+    },
+    {
+      "id": "s17",
+      "text": "从砺石智算开源新一代语言模型到720亿参数14万亿tokenApache2.0再到10月9日权重与推理代码上线整个发布链条已经闭合。",
+      "kind": "fact",
+      "claimIds": [
+        "c0",
+        "c2",
+        "c3",
+        "c4",
+        "c5"
+      ],
+      "anchors": [
+        {
+          "start": 15,
+          "length": 4,
+          "claimId": "c2"
+        },
+        {
+          "start": 38,
+          "length": 1,
+          "claimId": "c2"
+        },
+        {
+          "start": 41,
+          "length": 5,
+          "claimId": "c5"
+        }
+      ]
+    },
+    {
+      "id": "s18",
+      "text": "如果后续公开评测能够验证其在复杂任务上的稳定性这个发布对关注开源大模型的团队来说值得纳入下一轮选型。",
+      "kind": "opinion",
+      "claimIds": [],
+      "anchors": []
+    }
+  ],
+  "claims": {
+    "c0": {
+      "id": "c0",
+      "independence": 1,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "潮汐科技评论",
+          "note": "「砺石智算今日开源其新一代语言模型」",
+          "time": "14:20"
+        }
+      ]
+    },
+    "c2": {
+      "id": "c2",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "潮汐科技评论",
+          "note": "「该模型参数规模 720 亿。」",
+          "time": "14:20"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「该模型参数规模 720 亿。」",
+          "time": "16:02"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「该模型参数规模 720 亿。」",
+          "time": "17:35"
+        }
+      ]
+    },
+    "c3": {
+      "id": "c3",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "潮汐科技评论",
+          "note": "「训练数据 14 万亿 token。」",
+          "time": "14:20"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「训练数据 14 万亿 token。」",
+          "time": "16:02"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「训练数据 14 万亿 token。」",
+          "time": "17:35"
+        }
+      ]
+    },
+    "c4": {
+      "id": "c4",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "潮汐科技评论",
+          "note": "「模型采用 Apache 2.0 协议开源。」",
+          "time": "14:20"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「模型采用 Apache 2.0 协议开源。」",
+          "time": "16:02"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「模型采用 Apache 2.0 协议开源。」",
+          "time": "17:35"
+        }
+      ]
+    },
+    "c5": {
+      "id": "c5",
+      "independence": 3,
+      "mergedAwayCount": 1,
+      "sources": [
+        {
+          "publisher": "潮汐科技评论",
+          "note": "「权重与推理代码于 10 月 9 日上线。」",
+          "time": "14:20"
+        },
+        {
+          "publisher": "芜洲晚报",
+          "note": "「权重与推理代码于 10 月 9 日上线。」",
+          "time": "16:02"
+        },
+        {
+          "publisher": "白石湾日报",
+          "note": "「权重与推理代码于 10 月 9 日上线。」",
+          "time": "17:35"
+        }
+      ]
+    }
+  },
+  "recheckResults": null,
+  "stages": [
+    {
+      "name": "抓取原文",
+      "state": "done",
+      "count": "1 篇",
+      "detail": null
+    },
+    {
+      "name": "扩展检索",
+      "state": "done",
+      "count": "4 篇",
+      "detail": null
+    },
+    {
+      "name": "抽取事实点",
+      "state": "done",
+      "count": "31 条",
+      "detail": null
+    },
+    {
+      "name": "归并去重",
+      "state": "done",
+      "count": "16 点 · 4 独立源",
+      "detail": null
+    },
+    {
+      "name": "交叉验证",
+      "state": "done",
+      "count": "4 / 16",
+      "detail": null
+    },
+    {
+      "name": "选点",
+      "state": "done",
+      "count": "5 条",
+      "detail": null
+    },
+    {
+      "name": "成稿",
+      "state": "done",
+      "count": "18 句",
+      "detail": null
+    },
+    {
+      "name": "挂信源",
+      "state": "done",
+      "count": "16 句挂上",
+      "detail": null
+    },
+    {
+      "name": "时长与气口",
+      "state": "done",
+      "count": "132 秒 · 18 个气口",
+      "detail": null
+    }
+  ],
+  "budget": {
+    "used": 26955,
+    "budgeted": 136000,
+    "remainingThisMonth": 2917107,
+    "costCents": 18,
+    "byStage": {
+      "抽取事实点": 5899,
+      "交叉验证": 10612,
+      "成稿": 10444
+    }
+  },
+  "insufficientReason": null
+}

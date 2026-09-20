@@ -180,6 +180,93 @@ func runAlignmentSuite() -> (pass: Int, fail: Int) {
     let advResult = run(script: en, scenarios: adversarial, label: "ADVERSARIAL (EN)")
     totalPass += advResult.pass; totalFail += advResult.fail
 
+    // The scenarios above assert sentence indices, which is all that mattered
+    // while nothing read `tokenIndexInSentence`. The fixed-window prompter
+    // interpolates the reading cursor across a sentence from that index, so it
+    // is now load-bearing and needs its own coverage.
+    let offset = runTokenOffsetSuite(script: en)
+    totalPass += offset.pass; totalFail += offset.fail
+
     return (totalPass, totalFail)
+}
+
+/// A weak result must report the last position the engine actually earned —
+/// the sentence *and* the token inside it.
+///
+/// Reporting the sentence with a token index of 0 is worse than reporting
+/// nothing: `PromptScriptText.characterOffset(of:)` reads it as "back at the
+/// start of this sentence", so `ReadingPacer` corrects the cursor backwards
+/// while the reader is still moving forwards, and drops its lookahead ceiling
+/// at the same time.
+@MainActor
+func runTokenOffsetSuite(script: Script) -> (pass: Int, fail: Int) {
+    let report = Report()
+    report.suite("Alignment — a weak result holds the whole last known-good position")
+
+    let sentences = script.allSentences
+    let engine = SlidingWindowAlignmentEngine()
+    engine.reset(script: script, startingAt: nil)
+
+    func index(of position: ReadingPosition?) -> Int? {
+        position.flatMap { p in sentences.firstIndex { $0.id == p.address.sentenceId } }
+    }
+
+    // Recognizer transcripts are cumulative for the whole take, so the noise
+    // arrives appended to everything read so far — exactly as it does live.
+    var spoken = "Most teleprompters solve the wrong problem."
+    _ = engine.ingest(transcript: SpeechTranscript(text: spoken, isFinal: false))
+
+    spoken += " They make the words easy to read, but they pull"
+    let good = engine.ingest(transcript: SpeechTranscript(text: spoken, isFinal: false))
+
+    report.check(index(of: good) == 1,
+                 "reading into the second sentence lands on it",
+                 detail: "sentence \(index(of: good).map(String.init) ?? "nil")")
+    report.check((good?.confidence ?? 0) >= 0.34,
+                 "with a score above the confidence floor",
+                 detail: String(format: "%.3f", good?.confidence ?? 0))
+    report.check((good?.tokenIndexInSentence ?? 0) > 0,
+                 "and a real in-sentence token offset — without one there is nothing here to preserve",
+                 detail: "token \(good?.tokenIndexInSentence ?? -1)")
+
+    let earned = good?.tokenIndexInSentence ?? -1
+
+    // An ad-lib, a stumble, a cough, a siren: no candidate in the window owns
+    // any of it, so every one of these takes the low-confidence branch.
+    for noise in ["uh hold on sorry about that okay", "cough cough", "zzz qqq xxx yyy www vvv"] {
+        spoken += " " + noise
+        let weak = engine.ingest(transcript: SpeechTranscript(text: spoken, isFinal: false))
+
+        report.check((weak?.confidence ?? 1) < 0.34,
+                     "“\(noise)” scores below the floor, so this is the low-confidence branch",
+                     detail: String(format: "%.3f", weak?.confidence ?? -1))
+        report.check(index(of: weak) == 1,
+                     "and holds the sentence the reader is on")
+        report.check(weak?.tokenIndexInSentence == earned,
+                     "and holds the token offset too, rather than reporting the sentence's start",
+                     detail: "token \(weak?.tokenIndexInSentence ?? -1), earned \(earned)")
+    }
+
+    report.section("reading on from noise picks the offset back up")
+
+    spoken += " your eyes away from the lens"
+    let recovered = engine.ingest(transcript: SpeechTranscript(text: spoken, isFinal: false))
+
+    report.check(index(of: recovered) == 1,
+                 "still the same sentence")
+    report.check((recovered?.tokenIndexInSentence ?? 0) > earned,
+                 "and the offset advances past where the noise interrupted",
+                 detail: "token \(recovered?.tokenIndexInSentence ?? -1) vs \(earned)")
+
+    report.section("a reset clears the remembered offset")
+
+    engine.reset(script: script, startingAt: nil)
+    let afterReset = engine.ingest(transcript: SpeechTranscript(text: "qqq zzz xxx", isFinal: false))
+
+    report.check(afterReset?.tokenIndexInSentence == 0,
+                 "a new take starts at the top of its first sentence, not wherever the last one stopped",
+                 detail: "token \(afterReset?.tokenIndexInSentence ?? -1)")
+
+    return (report.pass, report.fail)
 }
 

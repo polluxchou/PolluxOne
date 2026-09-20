@@ -48,4 +48,18 @@ final class ScriptSyncService {
             try? await backend.reportReadingProgress(scriptId: scriptId, progress: progress)
         }
     }
+
+    /// Fire-and-forget, exactly like `reportProgress` above and for the same
+    /// reason: this is called from `SessionManager.endTake()`, which is not
+    /// async and whose callers are the user leaving the screen. A reading-rate
+    /// sample that fails to store costs the next estimate a little accuracy;
+    /// blocking the end of a take on it would cost the take.
+    func recordReadingRate(_ sample: ReadingPacer.Sample) {
+        Task {
+            try? await backend.upsertReadingRate(
+                language: sample.language,
+                charsPerSecond: sample.charsPerSecond
+            )
+        }
+    }
 }

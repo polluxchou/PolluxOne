@@ -20,7 +20,7 @@ enum TextTokenizer {
         }
 
         for character in text.lowercased() {
-            if character.isCJK {
+            if character.isCJKIdeographOrKana {
                 flushLatin()
                 tokens.append(String(character))
             } else if character.isWhitespace {
@@ -35,24 +35,5 @@ enum TextTokenizer {
         }
         flushLatin()
         return tokens
-    }
-}
-
-private extension Character {
-    var isCJK: Bool {
-        unicodeScalars.contains { scalar in
-            (0x4E00...0x9FFF).contains(scalar.value)      // CJK Unified Ideographs
-                || (0x3400...0x4DBF).contains(scalar.value) // Extension A
-                || (0xF900...0xFAFF).contains(scalar.value) // Compatibility Ideographs
-                || (0x3040...0x30FF).contains(scalar.value) // Hiragana / Katakana
-        }
-    }
-
-    var isCJKPunctuation: Bool {
-        unicodeScalars.contains { scalar in
-            (0x3000...0x303F).contains(scalar.value)       // 。、，「」etc.
-                || (0xFF00...0xFF0F).contains(scalar.value) // fullwidth ！？（）
-                || (0xFF1A...0xFF20).contains(scalar.value) // fullwidth ：；＜＝＞？＠
-        }
     }
 }

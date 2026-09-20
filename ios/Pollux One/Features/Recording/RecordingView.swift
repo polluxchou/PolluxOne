@@ -11,7 +11,12 @@ import SwiftUI
 /// both of which land inside the safe-area insets.
 struct RecordingView: View {
     @State private var viewModel: RecordingViewModel
-    let script: Script
+    /// 可选：相机是根视图，开机时通常没有稿。提词块整块随它隐藏。
+    let script: Script?
+    /// 右下角那一格要画什么，全由 `ScriptSlot(brief:)` 决定。这里只是把它
+    /// 传进去；相机不认识 Brief 的任何一种状态。
+    let brief: Brief?
+    let onOpenBrief: (BriefScreen) -> Void
 
     @State private var focusPoint: CGPoint?
     @State private var focusHideTask: Task<Void, Never>?
@@ -22,26 +27,42 @@ struct RecordingView: View {
         static let statusRowTop: CGFloat = 16
         static let teleprompterTop: CGFloat = 60
         static let teleprompterLeading: CGFloat = 20
+        /// Not a competing padding — subtracted from the space the Width
+        /// slider's fraction is taken *of*, alongside the leading inset. The
+        /// fraction still governs the column on its own; this only says how
+        /// much room there is to take a fraction of.
+        ///
+        /// It exists because Width = 1.0 otherwise puts the block's right edge
+        /// exactly on the screen's, which on a rounded display is under the
+        /// corner curvature and reads as broken next to a 20pt left inset.
+        /// 12 is the figure the pre-branch layout used, when it was a padding.
         static let teleprompterTrailing: CGFloat = 12
         static let exposureSliderBottom: CGFloat = 210
         static let paramsRowBottom: CGFloat = 162
         static let lensSelectorBottom: CGFloat = 112
         static let shutterRowBottom: CGFloat = 24
+        /// 100 + 60pt 高 = 160，正好压在参数行（162）底下一线；镜头药丸是居中的
+        /// 小胶囊，所以这一格靠右放不会碰到它。
+        static let scriptSlotBottom: CGFloat = 100
+        static let scriptSlotTrailing: CGFloat = 20
         /// Above every bottom control, inside the bottom scrim. NOT in the top
         /// HUD: that row is placed to flank the Dynamic Island, which swallows
         /// anything spanning the middle of it.
         static let archiveStatusBottom: CGFloat = 245
-        static let topScrimHeight: CGFloat = 300
+        /// 330, not 300: at the 28pt type-size ceiling a six-row Latin window
+        /// reaches 312pt from the top, and the rows past the gradient's end
+        /// lose their backing and sit straight on the picture.
+        static let topScrimHeight: CGFloat = 330
         static let bottomScrimHeight: CGFloat = 270
     }
 
-    init(script: Script, syncService: ScriptSyncService, takeArchiver: TakeArchiver) {
+    init(script: Script?,
+         sessionManager: SessionManager,
+         brief: Brief? = nil,
+         onOpenBrief: @escaping (BriefScreen) -> Void = { _ in }) {
         self.script = script
-        let sessionManager = SessionManager(
-            syncService: syncService,
-            alignmentEngine: SlidingWindowAlignmentEngine(),
-            takeArchiver: takeArchiver
-        )
+        self.brief = brief
+        self.onOpenBrief = onOpenBrief
         _viewModel = State(initialValue: RecordingViewModel(sessionManager: sessionManager))
     }
 
@@ -101,9 +122,27 @@ struct RecordingView: View {
         // nothing competes with the preview or crowds the prompter near the
         // lens. Edge-swipe still returns to the script list.
         .toolbar(.hidden, for: .navigationBar)
-        .task { await viewModel.start(script: script) }
+        // Keyed on the script, not fire-once: the session now outlives this
+        // view, so opening a different script has to reload the engines
+        // instead of relying on a fresh SessionManager to do it.
+        //
+        // With no script there is still a camera to bring up — the viewfinder
+        // and the shutter are not the prompter's dependents.
+        .task(id: script?.id) {
+            if let script {
+                await viewModel.start(script: script)
+            } else {
+                await viewModel.sessionManager.cameraEngine.requestAuthorizationAndConfigure()
+            }
+        }
         .onChange(of: viewModel.activeParameter) { _, _ in scheduleFocusReticleHide() }
-        .onDisappear { viewModel.sessionManager.teardown() }
+        // Deliberately no `onDisappear { sessionManager.teardown() }`: the
+        // session belongs to the app now, not to this view, and teardown stops
+        // the capture session and deactivates the audio session outright. That
+        // was right while this screen owned the session and was pushed from the
+        // script list; as the root it would instead have fired the first time
+        // anything covered the camera — a push out of the corner slot — and
+        // killed the global camera behind the screen that pushed it.
     }
 
     // MARK: - Layers
@@ -138,18 +177,62 @@ struct RecordingView: View {
             .padding(.horizontal, 18)
             .topAnchored(Offset.statusRowTop)
 
-            TeleprompterOverlayView(
-                state: viewModel.sessionManager.teleprompterEngine.displayState,
-                textSize: viewModel.teleprompterSettings.textSize,
-                micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
-                cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
-                onTap: { viewModel.openTeleprompterAdjust() }
-            )
-            .opacity(viewModel.teleprompterSettings.opacity)
-            .offset(y: viewModel.teleprompterSettings.verticalOffset)
-            .padding(.leading, Offset.teleprompterLeading)
-            .padding(.trailing, Offset.teleprompterTrailing)
-            .topAnchored(Offset.teleprompterTop)
+            // No script, no prompter — the whole block goes, rather than
+            // leaving an empty column of scrim where text should be. The
+            // shutter below is untouched: you can shoot without a script.
+            if script != nil {
+                // The engine, not values read off it. `@Observable` registers a
+                // dependency against whichever body performed the read, so reading
+                // `inLineProgress` and `readingProgress` here made two 30Hz
+                // properties invalidate all of this body — and with it the overlay,
+                // which carries closures and so cannot be equated away, and with
+                // that the whole-script ForEach inside it. Measured: 10 changes to
+                // `inLineProgress` produced 10 runs of this body and 10 of the
+                // overlay's. The engine splits those two out from `displayState`
+                // precisely so they invalidate only the fill and the rail; passing
+                // pre-read values handed that split straight back.
+                //
+                // `teleprompterEngine` and `sessionManager` are both `let`, which
+                // `@Observable` does not track, so naming them here costs nothing.
+                TeleprompterOverlayView(
+                    engine: viewModel.sessionManager.teleprompterEngine,
+                    textSize: viewModel.teleprompterSettings.textSize,
+                    micLevel: viewModel.sessionManager.audioLevelMonitor.recentLevels.last ?? 0,
+                    cameraFacing: viewModel.sessionManager.cameraEngine.configuration.facing,
+                    onTap: { viewModel.openTeleprompterAdjust() },
+                    onLayoutChange: { width, measurer in
+                        viewModel.sessionManager.teleprompterEngine.setLayout(width: width, measurer: measurer)
+                    }
+                )
+                // The Width slider had never been wired to anything: this is the
+                // first thing that reads textWidthFraction. It has to be applied
+                // here rather than inside the overlay, because the fraction is of
+                // the screen, and it is what decides where lines break.
+                //
+                // The fraction is of the space that is *left* once both insets are
+                // taken out, not of the whole screen. Taking it of the whole screen
+                // and then adding a leading padding makes the padded block
+                // `width × fraction + 20` wide, which at Width = 1.0 is wider than
+                // the screen — and an oversized child is centred by the anchor
+                // below whatever its alignment says, so the block hung 10pt off
+                // *both* edges. Subtracting first keeps the fraction as the single
+                // master of the column's width while making the left inset exactly
+                // 20 at every slider position.
+                .containerRelativeFrame(.horizontal, alignment: .leading) { width, _ in
+                    (width - Offset.teleprompterLeading - Offset.teleprompterTrailing)
+                        * viewModel.teleprompterSettings.textWidthFraction
+                }
+                .opacity(viewModel.teleprompterSettings.opacity)
+                .offset(y: viewModel.teleprompterSettings.verticalOffset)
+                .padding(.leading, Offset.teleprompterLeading)
+                // `.topLeading`, not the default `.top`: `.top`'s horizontal
+                // component is `.center`, which was a no-op while the overlay
+                // filled the offered width and started sliding the whole block
+                // sideways the moment containerRelativeFrame made it narrower.
+                // Measured in a 393pt container, the default fraction put the left
+                // edge at 37.51 instead of 20, and dragging the slider moved it.
+                .topAnchored(Offset.teleprompterTop, alignment: .topLeading)
+            }
         }
     }
 
@@ -217,6 +300,12 @@ struct RecordingView: View {
             )
             .padding(.horizontal, 32)
             .bottomAnchored(Offset.shutterRowBottom)
+
+            // 右下角那一格：整个 Brief 流程的唯一入口。它在镜头选择那一排的
+            // 右边，够不着快门也够不着参数行——按错一格的代价在这一屏比别处大。
+            ScriptSlotView(slot: ScriptSlot(brief: brief), onTap: onOpenBrief)
+                .bottomTrailingAnchored(bottom: Offset.scriptSlotBottom,
+                                        trailing: Offset.scriptSlotTrailing)
         }
     }
 
@@ -249,9 +338,24 @@ private extension View {
             .padding(.bottom, inset)
     }
 
+    /// `bottom:Npx; right:Npx` —— 两条边同时定住的那一种。
+    func bottomTrailingAnchored(bottom: CGFloat, trailing: CGFloat) -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            .padding(.bottom, bottom)
+            .padding(.trailing, trailing)
+    }
+
     /// The `top:Npx` counterpart.
-    func topAnchored(_ inset: CGFloat) -> some View {
-        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    ///
+    /// `alignment` defaults to `.top` — whose *horizontal* component is
+    /// `.center` — because that is what both callers wanted while both filled
+    /// the offered width. Anything narrower than the container has to say
+    /// `.topLeading` explicitly or it drifts to the middle. Left as a
+    /// parameter rather than a changed default so `TopHUDView`, which still
+    /// fills its width via an `HStack` with a `Spacer`, keeps the behaviour it
+    /// was written against.
+    func topAnchored(_ inset: CGFloat, alignment: Alignment = .top) -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
             .padding(.top, inset)
     }
 }

@@ -1,0 +1,107 @@
+import type { Fact, MergedClaim } from "../domain/types.js";
+import { jaccard, shingles, TEXT_SHINGLE_K } from "./shingle.js";
+import { createUnionFind } from "./union-find.js";
+
+/** 数字一致时，文本相似到这个值就算同一件事。 */
+export const MERGE_JACCARD = 0.45;
+/** 两边都没有数字时，门槛抬高——没有数字可对，只能更信文本。 */
+export const MERGE_JACCARD_NO_NUMBERS = 0.7;
+
+/**
+ * 数字，加上紧跟的最多两个非数字、非空白、**非标点**字符。
+ *
+ * 标点必须排除，否则一个句号就能让两句相同的话被判成互相矛盾：
+ * 「起步价 2 元」签名 `["2元"]`、「起步价 2 元。」签名 `["2元。"]` —— ④ 因为
+ * 签名不同不归并，⑤ 看到两条文本 Jaccard≈1.0 却互不为子多重集，于是把这
+ * 两句一模一样的话双双判成 conflicted 踢出稿子。两字量词（亿元/公里/万欧）
+ * 先把两个名额占满，句号根本轮不到，所以这个 bug 只在单字量词
+ * （年/球/日/元/人）上发作——体育、民生稿必炸，财经稿看不出来。
+ *
+ * 排除范围**只到标点为止**：多排一类字符就是让两个本来不同的数字拿到同一个
+ * 签名，那是过度归并——一条没人证实的说法会搭上另一条的信源，比漏归并危险。
+ * 所以 `%` `‰` 虽然 Unicode 归在标点（Po）里，这里必须留着：它们是量纲，
+ * 丢了就等于承认「45%」和「45」是同一个数。
+ */
+const NUMBER_WITH_UNIT = /(\d+(?:\.\d+)?)\s*((?:[%‰]|[^\d\s\p{P}]){0,2})/gu;
+
+/**
+ * 一句话里的全部「数字 + 单位」，排序后作为签名。
+ * 数字是口播稿里最容易翻车的东西：**签名不一致，绝不归并**。
+ *
+ * 为什么单位必须一起吃进来：只取裸数字时，「涉及金额约 23 亿美元」和
+ * 「涉及金额约 23 亿欧元」的签名都是 `["23"]`，而两句的 2-gram 相似度是
+ * 0.64，远超归并门槛——它们会被并成一条，其中一种币种**在到达 ⑤ 的冲突
+ * 检测之前就消失了**。数字不同本来指望 ⑤ 去判冲突，可这一类 gate 压根
+ * 不触发，所以补在这里，不能推给下一个计划。
+ *
+ * 取签名之前先 `NFKC`：`\d` 只认 ASCII 数字，中文媒体用全角数字不罕见。
+ * 不折叠的话「涉及金额约 ２３ 亿美元」的签名是空的，于是它和「约 23 亿美元」
+ * 不归并（签名不等），和「约 31 亿美元」也不报冲突（空集是任何集合的子
+ * 多重集）——**一个真的数字分歧就这么无声无息地播出去了**。`shingle.normalize`
+ * 早就在做 NFKC，但那只作用在文本指纹上，数字这一路一直是漏的。
+ *
+ * 只吃两个字符是刻意的：「亿美」「亿欧」已经足够区分，再多吃会把
+ * 「日起生效」这类行文差异也算进签名，让同一事实的两种措辞不归并。
+ *
+ * 仍然不做单位换算或数值归一：「1.50」≠「1.5」、「5%」≠「5 个百分点」。
+ * 这些都是漏归并——见下面 `mergeFacts` 上方对漏归并真实代价的说明。
+ */
+export function numericSignature(text: string): string[] {
+  return [...text.normalize("NFKC").matchAll(NUMBER_WITH_UNIT)]
+    .map((m) => m[1]! + (m[2] ?? ""))
+    .sort();
+}
+
+function sameNumbers(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((v, i) => v === b[i]);
+}
+
+/**
+ * ④ 归并：说同一件事的 Fact 合成一个 Claim。
+ * 返回 MergedClaim——independence 和 confidence 是 ⑤ 的事，这里连字段都没有。
+ *
+ * ## 漏归并到底是不是「安全方向」
+ *
+ * 这里曾经写着「少归并是安全方向」。那句话只在 ④ 自己的范围内成立，看**整条
+ * 流水线**就不成立了，因为漏归并的产物会原样流进 ⑤ 的判决：
+ *
+ * 1. 在 ④ 内：漏归并只是让一条事实拆成两条 claim，各自分走一部分信源，
+ *    双双可能掉到 `STRONG_INDEPENDENCE` 以下被标 weak。信息没丢，只是变弱。
+ * 2. 到了 ⑤：这两条 claim 文本几乎相同，会直接撞上 `findNumericConflicts`。
+ *    判据要是看「④ 的签名相不相等」，那么**每一次 ④ 眼里无害的漏归并，
+ *    到 ⑤ 都变成一次有害的误判冲突**——两条同义的话被双双判 conflicted
+ *    踢出稿子，`MINIMUM_STRONG_CLAIMS` 一翻，整篇「不建议播」。
+ *
+ * 所以 ⑤ 现在不看签名，改比 `quantities()`（见 `conflict.ts`）：数值归一、
+ * 量纲归一、行文进不来。有了这道隔离，行文差异造成的漏归并才**真的**只剩
+ * 第 1 条的代价。**过度归并仍然没有任何下游能救**——一个数字在 ④ 里被并掉，
+ * ⑤ 连见都见不到它。所以签名这一侧继续偏保守，一字不差才合并。
+ */
+export function mergeFacts(facts: Fact[]): MergedClaim[] {
+  const uf = createUnionFind(facts.length);
+
+  const prints = facts.map((f) => shingles(f.text, TEXT_SHINGLE_K));
+  const numbers = facts.map((f) => numericSignature(f.text));
+
+  for (let i = 0; i < facts.length; i++) {
+    for (let j = i + 1; j < facts.length; j++) {
+      const na = numbers[i]!;
+      const nb = numbers[j]!;
+      if (!sameNumbers(na, nb)) continue;
+
+      const bar = na.length === 0 ? MERGE_JACCARD_NO_NUMBERS : MERGE_JACCARD;
+      if (jaccard(prints[i]!, prints[j]!) >= bar) uf.union(i, j);
+    }
+  }
+
+  return uf.groups().map((indices, n) => {
+    // 最长的措辞信息量最大，用它当 Claim 的表述
+    const longest = indices.reduce((best, i) =>
+      facts[i]!.text.length > facts[best]!.text.length ? i : best, indices[0]!);
+    return {
+      id: `c${n}`,
+      text: facts[longest]!.text,
+      factIds: indices.map((i) => facts[i]!.id),
+    } satisfies MergedClaim;
+  });
+}

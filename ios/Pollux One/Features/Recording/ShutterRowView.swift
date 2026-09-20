@@ -9,6 +9,12 @@ struct ShutterRowView: View {
     let safeWord: String
     let facing: CameraFacing
     let canFlip: Bool
+    /// 没有稿时为 false。`SessionManager.startTake()` 开头就是
+    /// `guard let revision = scriptRevision else { return }`，所以无稿时的快门
+    /// 是「看得见、按得动、什么也不发生」——三种状态里最坏的一种。
+    ///
+    /// **这是一行可逆的判断。** 将来要做「无稿也能拍」，把这个参数连同它的
+    /// 调用点一起去掉即可；真正要改的是 `SessionManager`，让它在没有
     let onToggleRecording: () -> Void
     let onFlip: () -> Void
 

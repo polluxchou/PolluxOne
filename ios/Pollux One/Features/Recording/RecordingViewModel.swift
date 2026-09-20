@@ -38,7 +38,7 @@ final class RecordingViewModel {
         if sessionManager.recordingEngine.isRecording {
             sessionManager.endTake()
         } else {
-            sessionManager.startTake()
+            Task { await sessionManager.startTake() }
         }
     }
 

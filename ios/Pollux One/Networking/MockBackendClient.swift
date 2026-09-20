@@ -8,6 +8,7 @@ import Foundation
 final class MockBackendClient: BackendClient {
     private var user: User?
     private var scripts: [UUID: Script]
+    private(set) var readingRates: [ScriptLanguage: [Double]] = [:]
 
     init(startSignedIn: Bool = true) {
         // One EN + one 中文 script, so the teleprompter's CJK typography
@@ -66,6 +67,16 @@ final class MockBackendClient: BackendClient {
     func reportReadingProgress(scriptId: UUID, progress: ReadingProgress) async throws {
         // V1: no-op. A real backend would persist this for the Web console's
         // "last read X%" indicator.
+    }
+
+    /// Keeps every sample rather than one running number, because the rate
+    /// that matters is the median of the recent ones — see
+    /// `pipeline/src/domain/reading-rate.ts`. A mean would follow the one take
+    /// where the reader stumbled; a median doesn't. Supabase collapses this to
+    /// a single row per language, so `readingRates` is the mock's stand-in for
+    /// the window that the median is taken over.
+    func upsertReadingRate(language: ScriptLanguage, charsPerSecond: Double) async throws {
+        readingRates[language, default: []].append(charsPerSecond)
     }
 
     private static func sampleScripts() -> [Script] {
