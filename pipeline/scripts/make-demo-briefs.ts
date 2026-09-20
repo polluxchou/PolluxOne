@@ -246,9 +246,10 @@ async function makeOne(
   // ⑦ 成稿。喂给它的是 ⑥ 挑出来的那几条，不是全部非 conflicted 的——
   // 后者正是「选点 5 条、成稿 15 句」那个对不上的来源：谁决定进稿有过两个
   // 答案。现在唯一答案是 ⑥，而 buildDraftPrompt 收到 conflicted 会直接抛。
-  const picked = checked.selection.picked
-    .map((id) => checked.claims.find((c) => c.id === id))
-    .filter((c): c is NonNullable<typeof c> => c !== undefined);
+  // 取法跟 run.ts 一致：顺序用 picked 的（⑥ 排好的呈现顺序），id 全部来自
+  // checked.claims，get 不会落空——真落空了就该当场炸，不该悄悄少写几句。
+  const byId = new Map(checked.claims.map((c) => [c.id, c]));
+  const picked = checked.selection.picked.map((id) => byId.get(id)!);
   const drafted = await ports.draftScript(picked, news.durationSec, news.register);
 
   // 最后一遍带上稿子：⑧ 的挂信源要拿 draft 才做得了。
