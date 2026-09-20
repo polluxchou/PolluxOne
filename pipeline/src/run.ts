@@ -1,5 +1,6 @@
 // pipeline/src/run.ts
 import { buildBrief, type CoreResult } from "./core.js";
+import { DEFAULT_CHARS_PER_SECOND, detectLanguage } from "./domain/prosody.js";
 import type { DraftSentence, Fact, MergedClaim, Source } from "./domain/types.js";
 import type { Article } from "./net/jina.js";
 import type { Pair } from "./stages/conflict.js";
@@ -43,17 +44,35 @@ export interface Ports {
    * 数字冲突**合并**。判决权仍在代码：模型只回一个二分类。
    */
   findSemanticConflicts: (claims: MergedClaim[]) => Promise<Pair[]>;
+  /**
+   * ⑦ 成稿。`charsPerSecond` 是**靶子和尺子共用的那一个语速**：目标字数
+   * 由它乘时长算出来，事后 `core.seconds` 也由它量。两处用两个数的话，
+   * 「差了多少」本身就是假的。
+   *
+   * 它可选，是为了那些手上根本没有语速的调用方（脚本、测试）——见
+   * `resolveDraftRate`：不传就按 claim 文本的语种取默认值，而不是让每个
+   * 调用方各编一个数。`runPipeline` 自己**永远传**。
+   */
   draftScript: (
     claims: CoreResult["claims"],
     durationSec: number,
     register: number,
+    charsPerSecond?: number,
   ) => Promise<DraftSentence[]>;
 }
 
 export interface RunOptions {
   durationSec: number;
   register: number;
-  charsPerSecond: number;
+  /**
+   * 该用户的实测语速（§7 近 10 次的中位数）。**没有就别传**——不传时
+   * `runPipeline` 会照 ① 抓回来的正文判语种，取 `DEFAULT_CHARS_PER_SECOND`。
+   *
+   * 这比调用方自己先垫一个值强：调用方在抓到正文之前无从判断语种，垫出来的
+   * 只能是中文那个 5，于是一篇英文稿会被按 5 字/秒 定靶（60 秒要 300 个英文
+   * 字符，实际约 960），拨盘从一开始就错了一个量级。
+   */
+  charsPerSecond?: number;
 }
 
 export type RunResult =
@@ -86,6 +105,13 @@ export async function runPipeline(
   const first = await ports.readArticle(url);
   const fetchedAt = new Date().toISOString();
   const sources: Source[] = [toSource("s0", first, fetchedAt)];
+
+  // 语速在这里定下来，全程只有这一个值：⑦ 拿它定目标字数，最后一遍 buildBrief
+  // 拿它算 `seconds`，App 上显示的也是同一个数。用户有实测语速就用他的；没有就
+  // 照**用户自己给的那篇**正文判语种——稿子是照它里面的事实写的，语种一致。
+  const charsPerSecond =
+    options.charsPerSecond ??
+    DEFAULT_CHARS_PER_SECOND[detectLanguage(`${first.title} ${first.body}`)];
 
   // ② 扩展检索。selectCandidates 在抓取之前就按发布方收敛，省的是抓取的钱。
   const candidates = selectCandidates(
@@ -126,7 +152,7 @@ export async function runPipeline(
   const base = {
     durationSec: options.durationSec,
     register: options.register,
-    charsPerSecond: options.charsPerSecond,
+    charsPerSecond,
     sources,
     facts,
   };
@@ -172,7 +198,12 @@ export async function runPipeline(
   const byId = new Map(checked.claims.map((c) => [c.id, c]));
   // picked 里的 id 全部来自 checked.claims，get 不会落空。
   const picked = checked.selection.picked.map((id) => byId.get(id)!);
-  const draft = await ports.draftScript(picked, options.durationSec, options.register);
+  const draft = await ports.draftScript(
+    picked,
+    options.durationSec,
+    options.register,
+    charsPerSecond,
+  );
 
   // 最后一遍带上稿子：⑧ 的挂信源要拿 draft 才做得了。冲突图要跟着一起带，
   // 否则最终结果里那几条语义矛盾的 claim 会重新变回 strong。

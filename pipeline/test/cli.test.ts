@@ -177,3 +177,112 @@ test("npm run brief really works end to end", () => {
   const out = execFileSync("npx", ["tsx", "src/cli.ts", FIXTURE], { encoding: "utf8" });
   expect(JSON.parse(out).selection.verdict).toBe("ok");
 });
+
+// ——— ⑦ 的长度：拨盘上的时长到底有没有约束住成稿 ———
+
+/** 每次回不同内容的假发送器；最后一份用完之后一直回它。 */
+function fakeSendSeq(...contents: string[]) {
+  let i = 0;
+  return vi.fn().mockImplementation(async () => {
+    const content = contents[Math.min(i, contents.length - 1)]!;
+    i += 1;
+    return new Response(
+      JSON.stringify({
+        choices: [{ message: { content }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    );
+  });
+}
+
+/** 一份结构合规、可朗读字数正好 n 的稿子。60 秒 × 5 字/秒 = 300 字是靶心。 */
+const draftOfChars = (n: number): string =>
+  JSON.stringify({
+    sentences: [
+      { text: "央".repeat(20), kind: "transition", claimIds: [] },
+      { text: "央".repeat(n - 20), kind: "fact", claimIds: ["c0"] },
+    ],
+  });
+
+/** stderr 收进数组，顺便别让重跑的告警刷测试输出。 */
+async function withStderr<T>(fn: () => Promise<T>): Promise<{ value: T; err: string }> {
+  const lines: string[] = [];
+  const real = process.stderr.write.bind(process.stderr);
+  process.stderr.write = ((c: unknown) => { lines.push(String(c)); return true; }) as typeof process.stderr.write;
+  try {
+    return { value: await fn(), err: lines.join("") };
+  } finally {
+    process.stderr.write = real;
+  }
+}
+
+test("长度落在容差内就收工——不为了几个字去烧一次 deepseek-v4-pro", async () => {
+  const send = fakeSendSeq(draftOfChars(290));
+  const sentences = await livePorts(CONFIG, new TokenLedger(), send).draftScript(CLAIMS, 60, 0.5);
+
+  expect(send).toHaveBeenCalledTimes(1);
+  expect(sentences).toHaveLength(2);
+});
+
+test("太短就重跑一次，而且把差了多少说给模型听", async () => {
+  // 153 字 ≈ 31 秒，正是实跑里「要 60 秒交 31 秒」的那一版。
+  const send = fakeSendSeq(draftOfChars(153), draftOfChars(295));
+  const sentences = await livePorts(CONFIG, new TokenLedger(), send).draftScript(CLAIMS, 60, 0.5);
+
+  expect(send).toHaveBeenCalledTimes(2);
+  const retry = JSON.parse((send.mock.calls[1]![1] as RequestInit).body as string) as {
+    messages: { content: string }[];
+  };
+  const text = retry.messages[0]!.content;
+  expect(text).toMatch(/太短/);
+  expect(text).toContain("147"); // 差多少字是个数，不是一句「太短了」
+  // 第二版达标就交它，不再有第三次——⑦ 每跑一次都真付钱。
+  expect(sentences[1]!.text).toHaveLength(275);
+});
+
+test("长度的抱怨里不混结构问题——两类失败共用一条路，重跑时就说不清错在哪", async () => {
+  const send = fakeSendSeq(draftOfChars(153), draftOfChars(295));
+  await livePorts(CONFIG, new TokenLedger(), send).draftScript(CLAIMS, 60, 0.5);
+
+  const retry = JSON.parse((send.mock.calls[1]![1] as RequestInit).body as string) as {
+    messages: { content: string }[];
+  };
+  // validateDraft 的那几种 ProblemKind 一个都不该出现在长度这条路的抱怨里。
+  for (const kind of ["fact-without-claims", "opinion-with-claims", "unknown-claim", "bad-kind"]) {
+    expect(retry.messages[0]!.content).not.toContain(kind);
+  }
+});
+
+test("重跑之后仍然不达标也照样出稿——什么都不给比短了 20 秒更糟", async () => {
+  const send = fakeSendSeq(draftOfChars(153));
+  const { value: sentences, err } = await withStderr(() =>
+    livePorts(CONFIG, new TokenLedger(), send).draftScript(CLAIMS, 60, 0.5),
+  );
+
+  expect(send).toHaveBeenCalledTimes(2); // 只重跑一次，不是重跑到死
+  expect(sentences).toHaveLength(2);
+  // 但要如实上报：拨盘这一次从"保证"降成了"请求"。
+  expect(err).toMatch(/长度/);
+  expect(err).toContain("60");
+});
+
+test("两版都不达标时留更接近目标的那一版，不是无脑要第二版", async () => {
+  // 第一版短了三成，第二版长了一倍——重跑没有「一定更好」这回事。
+  const send = fakeSendSeq(draftOfChars(210), draftOfChars(600));
+  const { value: sentences } = await withStderr(() =>
+    livePorts(CONFIG, new TokenLedger(), send).draftScript(CLAIMS, 60, 0.5),
+  );
+
+  expect(sentences[1]!.text).toHaveLength(190); // 留下的是第一版
+});
+
+test("结构不合规两次仍然是抛，长度不达标才是接受——两类失败的处置相反", async () => {
+  const bad = '{"sentences":[{"text":"央行降准了","kind":"fact","claimIds":[]}]}';
+  const error = await livePorts(CONFIG, new TokenLedger(), fakeSendSeq(bad))
+    .draftScript(CLAIMS, 60, 0.5)
+    .catch((e: unknown) => e);
+
+  expect((error as Error).message).toMatch(/两次都没通过校验/);
+  // 短一点的稿子还是稿子，没挂信源的句子不是。
+});

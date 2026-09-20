@@ -338,3 +338,87 @@ describe("runPipeline", () => {
     expect(findSemanticConflicts).not.toHaveBeenCalled();
   });
 });
+
+// ——— 语速：⑦ 定靶用的那个数，必须和内核量长度用的是同一个 ———
+
+describe("runPipeline 的语速", () => {
+  const FILLERS = [FILLER_A, FILLER_B, FILLER_C];
+
+  const threeOf = (make: (filler: string) => string, fillers = FILLERS) =>
+    vi
+      .fn()
+      .mockResolvedValueOnce(article(make(fillers[0]!), "https://a.com/1"))
+      .mockResolvedValueOnce(article(make(fillers[1]!), "https://b.com/1"))
+      .mockResolvedValueOnce(article(make(fillers[2]!), "https://c.com/1"));
+
+  /** 跑一遍，把 ⑦ 收到的第四个参数（语速）拿出来。 */
+  async function rateSeenByDraft(
+    options: { durationSec: number; register: number; charsPerSecond?: number },
+    readArticle: ReturnType<typeof vi.fn>,
+    extractFacts: ReturnType<typeof vi.fn>,
+  ): Promise<{ rate: unknown; seconds: number }> {
+    let rate: unknown;
+    const draftScript = vi
+      .fn()
+      .mockImplementation((claims: { id: string }[], _d: number, _r: number, cps?: number) => {
+        rate = cps;
+        return Promise.resolve(
+          claims.map((c) => ({ text: `${c.id} 的事实句。`, kind: "fact", claimIds: [c.id] })),
+        );
+      });
+
+    const result = await runPipeline(
+      "https://a.com/1",
+      options,
+      ports({
+        readArticle,
+        findSources: vi.fn().mockResolvedValue(["https://b.com/1", "https://c.com/1"]),
+        extractFacts,
+        draftScript,
+      }),
+    );
+    if (result.status !== "ok") throw new Error(`本该出稿：${result.reason}`);
+    return { rate, seconds: result.core.seconds };
+  }
+
+  it("用户的实测语速一路传到 ⑦，而且就是内核量长度用的那一个", async () => {
+    // 靶子和尺子必须是同一个数：两处用两个数的话，「差了多少」本身就是假的。
+    const { rate, seconds } = await rateSeenByDraft(
+      { durationSec: 60, register: 0, charsPerSecond: 4 },
+      threeOf(body),
+      vi.fn().mockImplementation(sharedFacts),
+    );
+    expect(rate).toBe(4);
+    // 三句「cN 的事实句。」= 3 × 6 个可朗读字，按 4 字/秒 算。
+    expect(seconds).toBeCloseTo(18 / 4, 5);
+  });
+
+  it("没有实测语速时按 ① 抓回来的正文判语种——英文稿不会被按 5 字/秒 定靶", async () => {
+    const EN = ["cut the ratio by half a point", "released one trillion yuan", "deposit rate down ten basis points"];
+    const enBody = (filler: string) => `${filler} ${EN.join(". ")}.`;
+    const enFacts = (source: { id: string }) =>
+      Promise.resolve(
+        EN.map((text, i) => ({ id: `${source.id}-f${i}`, sourceId: source.id, text, quote: text })),
+      );
+
+    const { rate } = await rateSeenByDraft(
+      { durationSec: 60, register: 0 },
+      threeOf(enBody, [
+        "Reporters at the briefing wrote down every question and answer in careful detail today.",
+        "The newsroom collected overnight commentary from several economists about this policy move.",
+        "A studio panel of three guests discussed banking system liquidity at considerable length.",
+      ]),
+      vi.fn().mockImplementation(enFacts),
+    );
+    expect(rate).toBe(16);
+  });
+
+  it("中文正文不传语速时落到中文的默认值", async () => {
+    const { rate } = await rateSeenByDraft(
+      { durationSec: 60, register: 0 },
+      threeOf(body),
+      vi.fn().mockImplementation(sharedFacts),
+    );
+    expect(rate).toBe(5);
+  });
+});

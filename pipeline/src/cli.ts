@@ -3,12 +3,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, type Config } from "./config/env.js";
 import { buildBrief, type CoreInput } from "./core.js";
 import { findNumericConflicts } from "./dedupe/conflict.js";
-import { DEFAULT_CHARS_PER_SECOND } from "./domain/prosody.js";
+import type { DraftSentence } from "./domain/types.js";
 import { DeepSeekClient, DEFAULT_MAX_TOKENS, type Sender } from "./models/deepseek.js";
 import { TokenLedger } from "./models/ledger.js";
 import { ZhipuSearchClient } from "./models/zhipu-search.js";
 import { readArticle } from "./net/jina.js";
 import { runPipeline, type Ports, type RunOptions } from "./run.js";
+import {
+  checkDraftLength,
+  describeLength,
+  lengthComplaint,
+  lengthTarget,
+  resolveDraftRate,
+  type LengthMiss,
+} from "./stages/check-length.js";
 import {
   buildConflictPrompt,
   pairsToCheck,
@@ -17,7 +25,7 @@ import {
 } from "./stages/conflict.js";
 import { buildDraftPrompt } from "./stages/draft.js";
 import { buildExtractPrompt, parseExtractReply, type ExtractReply } from "./stages/extract.js";
-import { validateDraft } from "./stages/validate-draft.js";
+import { validateDraft, type Problem } from "./stages/validate-draft.js";
 
 /**
  * 从磁盘读进来的东西只是**形状像** CoreInput，`as` 一个检查都不做。
@@ -119,6 +127,16 @@ const CONFLICT_MAX_TOKENS = 2 * DEFAULT_MAX_TOKENS;
 const DRAFT_MAX_TOKENS = DEFAULT_MAX_TOKENS; // 几百字正文 + 推理，默认够
 
 /**
+ * ⑦ 最多调这么多次，**结构问题和长度问题合用这一个预算**。
+ *
+ * 2 是今天的花销上限，没有涨：⑦ 跑在 deepseek-v4-pro 上，每多一次都真付钱。
+ * 给两类问题各配一次重跑（最坏 3 次）在「第一版结构错、第二版长度错」这种
+ * 罕见序列上才有用，不值当把最贵那一步的账单上限提五成。用完预算而结构是
+ * 合格的，就按实际长度出稿——见 draftScript 里接受时的那段。
+ */
+const MAX_DRAFT_ATTEMPTS = 2;
+
+/**
  * `.env.local` 就在这个文件的上一层，**按模块位置解析而不是按 cwd**：
  * `loadConfig` 的默认值 "pipeline/.env.local" 只在仓库根目录下成立，
  * 而 `npm run brief` 的 cwd 恰恰是 pipeline/。
@@ -171,34 +189,74 @@ export function livePorts(config: Config, ledger: TokenLedger, send?: Sender): P
       return parseConflictReply(reply, new Set(claims.map((c) => c.id)));
     },
 
-    draftScript: async (claims, durationSec, register) => {
-      const prompt = buildDraftPrompt(claims, durationSec, register);
+    draftScript: async (claims, durationSec, register, charsPerSecond) => {
+      // 靶子和尺子共用这一个语速——两处用两个数的话，「差了多少」本身就是假的。
+      const rate = resolveDraftRate(claims, charsPerSecond);
+      const target = lengthTarget(durationSec, rate);
+      const prompt = buildDraftPrompt(claims, durationSec, register, rate);
       // conflicted 的 claim 既没进 prompt，也不许出现在稿子里。
       const allowed = new Set(claims.filter((c) => c.confidence !== "conflicted").map((c) => c.id));
 
-      // 下面这条「拒收+重跑」只对**输出不合规**成立：校验器返回 problems，
-      // 说清哪句不合规再跑一遍，确实可能就对了。
+      // 下面这条「拒收+重跑」只对**输出不合规**和**长度不达标**成立，而且这
+      // 两类走的是各自的类型、各自的抱怨话术：结构问题来自 validateDraft 的
+      // problems，长度问题来自 checkDraftLength 的 LengthMiss。一次重跑只带
+      // 一类问题，模型才知道该改哪儿。
       //
-      // 被 max_tokens 截断不属于这一类，所以它走的是另一条路：`draftOnce` 里
-      // 抛出的 TruncatedOutputError 从这里直接穿出去，一次都不重跑。同样的
-      // prompt 配同样的上限，重跑必然同样截断，而每一次截断都真付钱。
-      const first = await draftOnce(prompt, allowed);
-      if (first.ok) return first.sentences;
+      // 被 max_tokens 截断不属于这两类，所以它走的是另一条路：`draftOnce` 里
+      // 抛出的 TruncatedOutputError 从这个循环里直接穿出去，一次都不重跑。同样
+      // 的 prompt 配同样的上限，重跑必然同样截断，而每一次截断都真付钱。
+      let complaint: string | null = null;
+      let problems: Problem[] = [];
+      // 结构过了、只是长度不达标的那一版。留着它，是因为「什么都不给」比
+      // 「短了 20 秒」糟得多——见下面接受时的那段。
+      let best: { sentences: DraftSentence[]; miss: LengthMiss } | null = null;
 
-      // §6.2 只有我们自己的校验器兜着（DeepSeek 不支持 json_schema），
-      // 所以这里是**拒收+重跑**，不是"尽量"。问题一次报全，重跑才有意义。
-      const complaint = first.problems
-        .map((p) => `${p.index < 0 ? "整体" : `第 ${p.index + 1} 句`}：${p.kind}（${p.detail}）`)
-        .join("\n");
-      const second = await draftOnce(
-        `${prompt}\n\n上一版被退回了，逐条改掉下面的问题再输出一遍：\n${complaint}`,
-        allowed,
-      );
-      if (second.ok) return second.sentences;
+      for (let attempt = 0; attempt < MAX_DRAFT_ATTEMPTS; attempt += 1) {
+        const result = await draftOnce(
+          complaint === null
+            ? prompt
+            : `${prompt}\n\n上一版被退回了，逐条改掉下面的问题再输出一遍：\n${complaint}`,
+          allowed,
+        );
 
-      // 两次都过不了校验就出错，不许把没通过校验的稿子发出去。
+        if (!result.ok) {
+          // §6.2 只有我们自己的校验器兜着（DeepSeek 不支持 json_schema），
+          // 所以这里是**拒收+重跑**，不是"尽量"。问题一次报全，重跑才有意义。
+          problems = result.problems;
+          complaint = result.problems
+            .map((p) => `${p.index < 0 ? "整体" : `第 ${p.index + 1} 句`}：${p.kind}（${p.detail}）`)
+            .join("\n");
+          continue;
+        }
+
+        const length = checkDraftLength(result.sentences, target);
+        if (length.ok) return result.sentences;
+
+        // 两版都不达标时留更接近的那一版，而不是无脑要第二版：重跑没有
+        // 「一定更好」这回事，第二版完全可能从短了两成变成长了三成。
+        if (best === null || Math.abs(length.ratio - 1) < Math.abs(best.miss.ratio - 1)) {
+          best = { sentences: result.sentences, miss: length };
+        }
+        problems = [];
+        complaint = lengthComplaint(length, target);
+      }
+
+      if (best !== null) {
+        // 长度不对**不作废整篇稿**。三种结局排序很清楚：长了会当场超时最糟，
+        // 短了单薄但播得完，而「因为 40 秒不是 60 秒就什么都不给」比前两者都糟。
+        // App 上显示的本来就是实测秒数（core.seconds，和这里同一把尺），所以
+        // 一篇 40 秒的稿标着「40 秒」不算撒谎——只是拨盘这一次从"保证"降成了
+        // "请求"，那就把降级如实打出来，不许闷着。
+        process.stderr.write(
+          `${describeLength(best.miss, target)}——重跑过一次仍未落进容差，按实际长度出稿\n`,
+        );
+        return best.sentences;
+      }
+
+      // 结构问题两次都过不了才出错，不许把没通过校验的稿子发出去。
+      // 注意这和上面那一条不矛盾：短一点的稿子还是稿子，没挂信源的句子不是。
       throw new Error(
-        `成稿两次都没通过校验：\n${second.problems.map((p) => `${p.kind} ${p.detail}`).join("\n")}`,
+        `成稿两次都没通过校验：\n${problems.map((p) => `${p.kind} ${p.detail}`).join("\n")}`,
       );
     },
   };
@@ -223,8 +281,9 @@ export async function briefFromUrl(url: string, argv: string[]): Promise<number>
     options = {
       durationSec: parseNumber(argv[3], 60),
       register: parseNumber(argv[4], 0.5),
-      // 抓到正文之前无从判断语种，只能先用中文的回落值。spec §9.2 ①。
-      charsPerSecond: DEFAULT_CHARS_PER_SECOND.cjk,
+      // 不传 charsPerSecond：命令行这条路没有用户的实测语速（§9.2 ①：真实语速
+      // 还没开始采集），而语种要等 ① 抓到正文才判得了——那正是 runPipeline 里
+      // 做的事。以前这里垫一个中文的 5，英文稿就会被按 5 字/秒 定靶。
     };
     config = loadConfig(ENV_PATH);
   } catch (error) {

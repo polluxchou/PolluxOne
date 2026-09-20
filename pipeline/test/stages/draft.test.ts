@@ -94,3 +94,55 @@ describe("buildDraftPrompt", () => {
     expect(() => buildDraftPrompt([], 60, 0)).toThrow(/没有/);
   });
 });
+
+// —— 时长以前只是 prompt 里的一个数字，不约束任何东西：实跑要 60 秒交了 31 秒 ——
+
+describe("buildDraftPrompt 里的长度指标", () => {
+  it("写明目标字数和句数范围——只说字数，模型会塞进一长句", () => {
+    const p = buildDraftPrompt(claims, 60, 0);
+    // 60 秒 × 5 字/秒（中文 claim 判出来的默认语速）
+    expect(p).toContain("300 字");
+    expect(p).toMatch(/8 到 12 句/);
+  });
+
+  it("两个方向的后果都说了——短了播不满，长了会超时", () => {
+    const p = buildDraftPrompt(claims, 60, 0);
+    expect(p).toMatch(/短了/);
+    expect(p).toMatch(/超时/);
+  });
+
+  it("目标字数跟着时长走", () => {
+    expect(buildDraftPrompt(claims, 30, 0)).toContain("150 字");
+    expect(buildDraftPrompt(claims, 180, 0)).toContain("900 字");
+  });
+
+  it("传进来实测语速就按它定靶，不用语种默认值", () => {
+    // 念得慢的人（4 字/秒）拿到的是更短的稿：App 上显示的秒数按他的语速算，
+    // 靶子按默认值定的话，他永远看到一个比拨盘大的数。
+    expect(buildDraftPrompt(claims, 60, 0, 4)).toContain("240 字");
+  });
+
+  it("英文 claim 按拉丁语速定靶——不然 60 秒的英文稿会被要求写 300 个字符", () => {
+    const english: VerifiedClaim[] = [
+      {
+        id: "c0",
+        text: "The central bank cut the reserve requirement ratio by half a point",
+        factIds: ["f0"],
+        independence: 3,
+        confidence: "strong",
+        conflictsWith: [],
+      },
+    ];
+    const p = buildDraftPrompt(english, 60, 0);
+    expect(p).toContain("960 字");
+    // 句数范围跟中文一样：一句话念多久与语种无关。
+    expect(p).toMatch(/8 到 12 句/);
+  });
+
+  it("给出把稿子写够长的合法办法——名额有限，不说这条模型就会编一条事实", () => {
+    // 60 秒只有 3 条 claim（factSlots），却要写 8–12 句：这两个数之间有张力，
+    // 「同一条 claim 可以连着写几句」是唯一不靠编造就能填满的出路。
+    const p = buildDraftPrompt(claims, 60, 0);
+    expect(p).toMatch(/同一条 claim 可以连着写几句/);
+  });
+});
