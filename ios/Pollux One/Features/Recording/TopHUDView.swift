@@ -8,6 +8,10 @@ import SwiftUI
 /// Nothing else belongs on this row. The two clusters are placed to flank the
 /// Dynamic Island, so anything spanning the middle — a centred status line,
 /// say — is simply swallowed by the cutout.
+///
+/// Carries no insets of its own. RecordingView places this row at the spec's
+/// absolute top/horizontal offsets like every other HUD element, so insets
+/// repeated here would not override those — they would add to them.
 struct TopHUDView: View {
     let isRecording: Bool
     let elapsedSeconds: TimeInterval
@@ -42,8 +46,6 @@ struct TopHUDView: View {
             }
         }
         .shadow(color: .black.opacity(0.7), radius: 4, y: 1)
-        .padding(.horizontal, 18)
-        .padding(.top, 16)
     }
 
     private static func elapsedFormatter(_ seconds: TimeInterval) -> String {
